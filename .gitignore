@@ -1,0 +1,56 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+frontend/dist/
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+dist/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+*.egg-info/
+build/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local application data and credentials
+/.clipforge/
+/data/
+*.pem
+*.key
+
+# Browser and end-to-end test output
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/screenshots/
+frontend/videos/
+frontend/traces/
+/test-results/
+
+# Local logs and runtime output
+*.log
+logs/
+*.out
+
+# Personal media staging; test fixtures remain trackable under tests/fixtures/
+/local-media/
+/media/
+/uploads/
+/downloads/
+/recordings/
+/captures/

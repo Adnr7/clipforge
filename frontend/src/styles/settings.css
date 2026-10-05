@@ -1,0 +1,126 @@
+/* Settings is an independent, keyboard-friendly scroller inside the native dialog. */
+.settings-dialog.settings-modal[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(1080px, calc(100vw - 32px));
+  height: min(860px, calc(100dvh - 40px));
+  overflow: hidden;
+}
+.settings-dialog.settings-modal > .modal-header { flex: 0 0 auto; }
+.settings-dialog.settings-modal > .modal-body { display: flex; flex: 1; min-height: 0; padding: 0; overflow: hidden; }
+.settings-dialog .settings-shell { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; }
+.settings-dialog .settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0; }
+.settings-dialog .settings-sidebar { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 22px 12px; border-right: 1px solid var(--border-color); background: var(--bg-primary); overflow-y: auto; }
+.settings-dialog .settings-sidebar-label { padding: 0 12px 10px; font-size: 13px; font-weight: 650; color: var(--text-secondary); }
+.settings-dialog .settings-sidebar > button { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-height: 46px; padding: 10px 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; font-size: 15px; line-height: 1.4; }
+.settings-dialog .settings-sidebar > button:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.settings-dialog .settings-sidebar > button[aria-current='page'] { border-color: var(--accent-primary); background: var(--accent-soft); color: var(--accent-primary); font-weight: 650; box-shadow: inset 3px 0 var(--accent-primary); }
+.settings-dialog .settings-sidebar-note { margin-top: auto; padding: 24px 12px 0; font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
+.settings-dialog .settings-pane { min-width: 0; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 24px; scroll-padding: 16px; }
+.settings-dialog .settings-pane:focus-visible { outline-offset: -4px; }
+.settings-dialog .settings-section-header { margin-bottom: 24px; }
+.settings-dialog .settings-section-header h3 { font-size: 24px; line-height: 1.3; margin-bottom: 7px; letter-spacing: -.5px; }
+.settings-dialog .settings-section-header p { color: var(--text-secondary); font-size: 16px; line-height: 1.6; }
+.settings-dialog .settings-section-body { display: flex; flex-direction: column; align-items: stretch; gap: 20px; min-width: 0; }
+.settings-dialog .settings-section-body > * { min-width: 0; }
+.settings-dialog .settings-pane > .notice { margin-bottom: 18px; }
+.settings-dialog .settings-help, .settings-dialog .muted, .settings-dialog .field-hint { font-size: 14px; font-weight: 400; line-height: 1.6; color: var(--text-secondary); overflow-wrap: anywhere; }
+.settings-dialog .settings-help { margin-top: 3px; }
+.settings-dialog h4 { font-size: 17px; line-height: 1.5; }
+.settings-dialog .input-field, .settings-dialog .field, .settings-dialog .theme-select select { font-size: 16px; }
+.settings-dialog .input-field { min-height: 44px; }
+.settings-dialog .btn-accent, .settings-dialog .btn-secondary, .settings-dialog .btn-danger, .settings-dialog .text-button { min-height: 44px; font-size: 15px; }
+.settings-dialog .text-button { align-self: flex-start; text-align: left; }
+.settings-dialog .settings-card { display: flex; flex-direction: column; gap: 8px; padding: 18px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); min-width: 0; }
+.settings-dialog .settings-appearance { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; }
+.settings-dialog .theme-select { padding: 3px 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-secondary); }
+.settings-dialog .theme-select select { max-width: 180px; }
+.settings-dialog .settings-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; min-width: 0; }
+.settings-dialog .settings-row > div { min-width: 0; overflow-wrap: anywhere; }
+.settings-dialog .settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; min-width: 0; }
+.settings-dialog .settings-key-notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-left: 3px solid var(--accent-primary); background: var(--accent-soft); color: var(--text-primary); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-dialog .settings-key-notice > svg { flex-shrink: 0; margin-top: 3px; color: var(--accent-primary); }
+.settings-dialog .settings-current-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.settings-dialog .settings-current-provider { min-width: 0; overflow-wrap: anywhere; }
+.settings-dialog .settings-current-provider h5 { margin: 0 0 4px; color: var(--text-secondary); font-size: 13px; font-weight: 650; }
+.settings-dialog .settings-current-provider > strong { font-size: 16px; }
+.settings-dialog .settings-current-providers > .settings-help { padding-top: 8px; border-top: 1px solid var(--border-color); }
+.settings-dialog .settings-capabilities { position: sticky; top: 0; z-index: 2; display: flex; align-self: flex-start; flex-wrap: wrap; gap: 5px; padding: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); border-radius: 8px; }
+.settings-dialog .settings-capabilities button { min-height: 44px; padding: 8px 14px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 15px; }
+.settings-dialog .settings-capabilities button[aria-pressed='true'] { background: var(--bg-secondary); border-color: var(--border-strong); color: var(--accent-primary); font-weight: 650; box-shadow: var(--shadow-sm); }
+.settings-dialog .settings-provider-content { justify-content: flex-start; }
+.settings-dialog .settings-provider-content > * { flex-shrink: 0; }
+.settings-dialog .settings-connection-list { display: flex; flex-direction: column; gap: 10px; }
+.settings-dialog .settings-connection-card { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; text-align: left; color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); }
+.settings-dialog .settings-connection-card:hover:not(:disabled), .settings-dialog .settings-provider-tile:hover { border-color: var(--accent-primary); background: var(--accent-soft); }
+.settings-dialog .settings-connection-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.settings-dialog .settings-connection-copy > span, .settings-dialog .settings-connection-copy > small { display: block; font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
+.settings-dialog .settings-connection-card > .badge { max-width: 170px; white-space: normal; overflow-wrap: anywhere; }
+.settings-dialog .settings-provider-mark { display: grid; flex: 0 0 40px; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border-color); border-radius: 9px; font-size: 13px; font-weight: 750; letter-spacing: .3px; color: var(--accent-primary); background: var(--accent-soft); }
+.settings-dialog .settings-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 22px; color: var(--text-secondary); background: var(--bg-primary); }
+.settings-dialog .settings-provider-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.settings-dialog .settings-provider-tile { display: flex; align-items: center; gap: 12px; min-height: 98px; padding: 15px; text-align: left; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; }
+.settings-dialog .settings-provider-tile > span:nth-child(2) { flex: 1; min-width: 0; }
+.settings-dialog .settings-provider-tile strong { display: block; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.settings-dialog .settings-provider-tile small { display: block; margin-top: 4px; font-size: 14px; color: var(--text-secondary); }
+.settings-dialog .settings-profile-form { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.settings-dialog .settings-profile-actions { position: sticky; top: 64px; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); }
+.settings-dialog .settings-profile-form .input-field { scroll-margin-top: 140px; scroll-margin-bottom: 16px; }
+.settings-dialog .settings-profile-actions .btn-danger { margin-left: auto; }
+.settings-dialog .settings-test-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; overflow-wrap: anywhere; }
+.settings-dialog .settings-caption-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.settings-dialog .settings-caption-card { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-secondary); cursor: pointer; min-width: 0; }
+.settings-dialog .settings-caption-card.is-selected { border-color: var(--accent-primary); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent-primary); }
+.settings-dialog .settings-caption-card:focus-within { outline: 3px solid var(--accent-primary); outline-offset: 3px; }
+.settings-dialog .settings-caption-label { display: flex; align-items: center; gap: 9px; }
+.settings-dialog .settings-caption-label input { margin: 0; accent-color: var(--accent-primary); flex-shrink: 0; }
+.settings-dialog .settings-caption-card small { font-size: 14px; color: var(--text-secondary); }
+/* A fixed dark video-like stage preserves each preset's actual caption colors in every theme. */
+.settings-dialog .settings-caption-preview { display: flex; justify-content: center; align-items: center; min-height: 74px; padding: 12px; border: 1px solid #526273; border-radius: 5px; background: linear-gradient(145deg, #405466, #16212b); font-family: Arial, sans-serif; line-height: 1.25; }
+.settings-dialog .settings-caption-preview-bold { font-family: Impact, 'Arial Black', sans-serif; font-weight: 900; }
+.settings-dialog .settings-caption-preview-neon, .settings-dialog .settings-caption-preview-sunset, .settings-dialog .settings-caption-preview-bubble { font-weight: 700; }
+.settings-dialog .settings-caption-preview-typewriter { font-family: 'Courier New', monospace; }
+.settings-dialog .settings-caption-preview-mono { font-family: 'DejaVu Sans Mono', monospace; }
+.settings-dialog .settings-environment-list { border: 1px solid var(--border-color); border-radius: 8px; }
+.settings-dialog .settings-environment-list > div { padding: 16px 18px; }
+.settings-dialog .settings-environment-list > div + div { border-top: 1px solid var(--border-color); }
+.settings-dialog .settings-path { font-family: var(--font-mono); font-size: 14px; overflow-wrap: anywhere; }
+.settings-dialog .settings-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; min-height: 72px; padding: 14px 24px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); }
+.settings-dialog .settings-footer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; }
+.settings-dialog .settings-feedback { display: flex; align-items: flex-start; gap: 8px; min-width: 0; max-height: 100px; overflow: auto; font-size: 14px; line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
+.settings-dialog .settings-feedback > svg, .settings-dialog .settings-feedback > .spinner { margin-top: 2px; }
+.settings-dialog .settings-feedback.is-success { color: var(--success); }
+.settings-dialog .settings-feedback.is-error { color: var(--error); }
+
+@media (max-width: 760px) {
+  .settings-dialog.settings-modal[open] { height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); width: calc(100% - 20px); }
+  .settings-dialog .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-dialog .settings-sidebar { flex-direction: row; gap: 6px; padding: 10px 12px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border-color); scrollbar-width: thin; }
+  .settings-dialog .settings-sidebar > button { white-space: nowrap; padding: 9px 12px; }
+  .settings-dialog .settings-sidebar > button[aria-current='page'] { box-shadow: inset 0 -3px var(--accent-primary); }
+  .settings-dialog .settings-sidebar-label, .settings-dialog .settings-sidebar-note { display: none; }
+  .settings-dialog .settings-pane { padding: 20px; }
+  .settings-dialog .settings-footer { padding: 12px 18px; gap: 12px; }
+}
+@media (max-width: 520px) {
+  .settings-dialog .settings-pane { padding: 18px 14px; }
+  .settings-dialog .settings-fields, .settings-dialog .settings-provider-tiles { grid-template-columns: minmax(0, 1fr); }
+  .settings-dialog .settings-provider-tile { min-height: 78px; }
+  .settings-dialog .settings-section-header { margin-bottom: 20px; }
+  .settings-dialog .settings-section-header h3 { font-size: 22px; }
+  .settings-dialog .settings-section-body { gap: 16px; }
+  .settings-dialog .settings-connection-card { flex-wrap: wrap; padding: 12px; gap: 10px; }
+  .settings-dialog .settings-connection-card .settings-provider-mark { display: none; }
+  .settings-dialog .settings-connection-copy { flex-basis: 65%; }
+  .settings-dialog .settings-profile-actions .btn-danger { margin-left: 0; }
+  .settings-dialog .settings-caption-grid { gap: 10px; }
+  .settings-dialog .settings-caption-card { padding: 9px; }
+  .settings-dialog .settings-caption-preview { padding: 6px; min-height: 66px; }
+  .settings-dialog .settings-footer { flex-direction: column; align-items: stretch; padding: 10px 14px; gap: 10px; }
+  .settings-dialog .settings-feedback { max-height: 64px; }
+  .settings-dialog .settings-footer-actions { justify-content: stretch; }
+  .settings-dialog .settings-footer-actions > button { flex: 1 1 auto; min-width: 0; }
+}
+@media (max-width: 360px) {
+  .settings-dialog .settings-caption-grid, .settings-dialog .settings-current-grid { grid-template-columns: minmax(0, 1fr); }
+}

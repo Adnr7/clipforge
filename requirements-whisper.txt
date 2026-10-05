@@ -1,0 +1,2 @@
+# Optional local transcription. Install after requirements.txt.
+openai-whisper>=20231117

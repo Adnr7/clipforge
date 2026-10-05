@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible problem in ClipForge.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem with synthetic or shareable data. Remove API keys,
+        private paths, and personal media from logs and screenshots. For a
+        vulnerability, follow SECURITY.md instead of posting exploit details here.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and its effect on your workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import a synthetic video...
+        2. Open...
+        3. Choose...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python/Node/FFmpeg versions, browser or desktop mode, revision, and relevant model name.
+      placeholder: |
+        OS:
+        ClipForge revision:
+        Mode / browser:
+        Python:
+        Node.js:
+        FFmpeg:
+        Provider / model (no key):
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or screenshots
+      description: Include sanitized error details and screenshots if useful.

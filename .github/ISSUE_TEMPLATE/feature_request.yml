@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose an improvement to ClipForge.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Explain the workflow or need that is not currently addressed.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: Describe the intended behavior and how it would help.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and examples
+      description: Include examples, affected workflows, and whether you would like to help implement it.

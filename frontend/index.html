@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClipForge</title>
+    <meta name="description" content="ClipForge — a focused workspace for turning long-form media into short-form clips." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      try {
+        const theme = localStorage.getItem('clipforge.theme');
+        document.documentElement.dataset.theme = ['light', 'dark', 'nord'].includes(theme) ? theme : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      } catch { document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+    </script>
+    <style>
+      html, body { margin: 0; padding: 0; }
+      html[data-theme="light"], html[data-theme="light"] body { background: #f7f8fa; }
+      html[data-theme="dark"], html[data-theme="dark"] body { background: #0b0b0c; }
+      html[data-theme="nord"], html[data-theme="nord"] body { background: #2e3440; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
