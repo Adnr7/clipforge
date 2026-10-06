@@ -6,15 +6,18 @@ API.
 
 ## Components
 
-```text
-main.py
-  └── Waitress / Flask on 127.0.0.1
-        ├── React production build (frontend/dist)
-        ├── /api routes
-        │     ├── project and provider services → SQLite / local files
-        │     ├── media and caption services → FFmpeg / FFprobe
-        │     └── analysis / transcription services → selected provider
-        └── optional pywebview desktop window
+[Documentation hub](README.md) · [Development](development.md) · [API reference](api.md)
+
+```mermaid
+flowchart TB
+  UI[React / TypeScript interface] --> API[Waitress + Flask · localhost]
+  WEB[Browser or pywebview window] --> UI
+  API --> DB[(SQLite / local files)]
+  API --> MEDIA[FFmpeg / FFprobe]
+  API --> ASR[Deepgram or local Whisper]
+  API --> EDIT[Audience-aware selection services]
+  EDIT --> MODEL[Selected cloud or local model]
+  MEDIA --> OUT[Preview frames · MP4 · ZIP]
 ```
 
 | Location | Responsibility |
@@ -36,8 +39,8 @@ The frontend build is served by Flask; Vite proxies `/api` during development.
 
 1. Import/upload media and probe its duration, streams, and display geometry.
 2. Optionally extract/transcribe speech with Deepgram or local Whisper.
-3. Analyze speech text or sampled video frames using a selected model, or create
-   manual clip candidates.
+3. Use timed speech scout/critic selection or sampled-frame recommendations with
+   an audience brief and selected model, or create manual clip candidates.
 4. Review candidates, persist selection, and choose output/caption/filter settings.
 5. Render through FFmpeg, track the returned artifact ID, and serve previews or
    completed-file downloads.
@@ -53,14 +56,38 @@ settings/profiles, and managed media. Root `.env` values are initial defaults;
 saved `DATA_DIR/.env` values take precedence at startup. Profile credentials are
 write-only through the API and stored locally, not encrypted at rest.
 
-Transcription and analysis use independently attributed project jobs and claims
-to prevent stale workers from overwriting newer results. Candidate replacement
-is atomic. Rendering uses a shared two-worker executor and deduplicates matching
-active/completed work.
+Transcription and analysis use independently attributed jobs and serialized
+availability checks. Explicit audio extraction additionally uses persisted claim
+tokens to prevent stale workers publishing over a newer attempt. Candidate
+replacement is atomic after validation. Rendering uses a shared two-worker
+executor and deduplicates matching active/completed work.
 
 Interrupted jobs become retryable errors after restart rather than resuming
 checkpoints. YouTube download status is in memory. Stopping AI Edit halts future
 browser orchestration; an accepted backend job may still complete.
+
+### Data relationships
+
+```mermaid
+erDiagram
+  PROJECT ||--o{ TRANSCRIPT : has
+  PROJECT ||--o{ CANDIDATE : proposes
+  CANDIDATE ||--o{ CLIP : renders
+  PROJECT ||--o{ FILTER_SUGGESTION : stores
+  PROVIDER_PROFILE ||--o| ACTIVE_PROFILE : selected
+```
+
+Transcript rows store normalized source timing in `raw_json`. Candidates store
+boundaries, selection, and optional `selection_json` explanations. Clip rows
+record the artifact path/status and immutable render identity. Provider profiles
+and active selections are independent of project data. Legacy copy-metadata
+tables do not imply social-platform publishing is implemented.
+
+Audience drafts use `clipforge.audience.v1.<projectId>` in `localStorage` and are
+shared by Manual/AI controls. AI options/chat use project-scoped `sessionStorage`;
+neither storage resumes an interrupted plan automatically. Project detail
+serializes validated candidate metadata as `selection`, with `null` for legacy
+and manual cuts.
 
 ## Shared rendering contract
 
@@ -84,6 +111,14 @@ Provider profiles select the model, endpoint, and credentials. Model results are
 schema-validated before persistence. Invalid timing, scores, or frame evidence
 must not become clip records.
 
+Speech analysis receives the full timed transcript, not just a flattened string.
+Bounded overlapping windows feed a scout, then shortlisted clip text feeds a
+second critic call on the same frozen connection. Code owns boundary resolution,
+quote validation, score arithmetic, quality gates, and overlap/topic-label
+deduplication. No-approved-result and invalid-output failures preserve prior
+candidates/artifacts. See [Audience selection](audience-selection.md) for budgets,
+metadata, and evaluation.
+
 Visual analysis normally sends ten timestamped bounded JPEG samples through
 OpenAI-compatible multimodal requests or native Claude image blocks. It does
 not send audio or provide full-video/beat understanding.
@@ -93,4 +128,7 @@ Chat and visual recommendations do not mutate candidates or editor settings.
 Analysis jobs persist candidates; AI Edit applies recommendations only through
 the user's reviewed workflow choice.
 
-See [AI Edit integration](ai-edit-mode.md) for detailed contracts.
+See [AI Edit integration](ai-edit-mode.md) and the [API reference](api.md) for
+detailed contracts. Preview/advice capacity is bounded with semaphores, while
+transcription/analysis run outside request threads. Network calls do not hold a
+long-lived SQLite write transaction.

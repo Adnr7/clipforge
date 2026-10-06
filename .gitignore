@@ -29,6 +29,7 @@ Thumbs.db
 
 # Local application data and credentials
 /.clipforge/
+/.dev-data/
 /data/
 *.pem
 *.key

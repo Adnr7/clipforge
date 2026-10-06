@@ -1,5 +1,7 @@
 # Troubleshooting
 
+[Documentation hub](README.md) · [Development](development.md) · [Testing](testing.md)
+
 ## The interface does not load
 
 Build the frontend from `frontend/`:
@@ -57,6 +59,43 @@ vision models.
 Use **Video visuals** for a video with an image-capable model, or create a manual
 cut. Silence and background music do not produce a speech transcript. Keep
 captions off when rendering without speech.
+
+## Analysis returns no usable candidates for this audience
+
+The method can reject every proposal when relevance, payoff, or standalone
+clarity is weak. Give a concrete viewer and achievable takeaway; check that the
+source actually contains a complete useful idea. Review the transcript for timing
+or speech errors. A manual cut remains available. Failed analysis preserves the
+previous candidates and artifacts rather than filling the list arbitrarily.
+
+## Transcript timing or bounded analysis budget fails
+
+Speech analysis needs finite source timestamps. Retranscribe an old/malformed
+transcript rather than supplying guessed boundaries. Oversized segments need
+word timestamps; sources exceeding the window/review/time budget need to be
+shortened. [Current budgets and method](audience-selection.md#source-constraints-and-budgets).
+
+## Editorial provider request fails
+
+Confirm the selected effective model/endpoint, provider access/quota, and JSON
+support. OpenAI-compatible base URLs must not include `/chat/completions`; it is
+appended by the transport. A successful basic connection test does not establish
+that a model can meet the timed scout/critic contract. Try a suitable model and a
+shorter source. Provider error details are intentionally not echoed verbatim.
+
+## Existing candidates do not reflect an edited audience
+
+Changing audience fields saves the next request's brief, not a reanalysis. Run
+analysis again and confirm replacement when existing candidates are present.
+AI Edit defaults to fresh analysis; explicit **Reuse existing candidates** keeps
+their old scores and explanations.
+
+## A job stays active, or stopping AI Edit did not stop its render
+
+Check the stage-specific `jobs` in project detail and accepted clip IDs. Stopping
+browser automation prevents future requests; queued server work can finish.
+Wait for active work before restarting. After a restart, interrupted stages and
+pending renders become retryable errors rather than resuming automatically.
 
 ## Whisper is not installed
 

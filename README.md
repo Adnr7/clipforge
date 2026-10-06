@@ -1,74 +1,149 @@
 # ClipForge
 
-**A local-first studio for turning long videos and audio into short clips.**
+<p align="center">
+  <img src="docs/images/clipforge-banner.svg" alt="ClipForge — your footage, your audience, your edit" width="1280" />
+</p>
 
-[![CI](https://github.com/Adnr7/clipforge/actions/workflows/ci.yml/badge.svg)](https://github.com/Adnr7/clipforge/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <strong>Turn long recordings into short, audience-relevant stories.</strong><br />
+  Import. Find the idea. Shape the edit. Render on your own machine.
+</p>
 
-ClipForge combines media import, optional transcription, AI-assisted highlight
-selection, manual cuts, captions, and MP4 export in one desktop or browser
-workspace. Keep the source framing or choose an output ratio, review the edit,
-and render on your own machine.
+<p align="center">
+  <a href="https://github.com/Adnr7/clipforge/actions/workflows/ci.yml"><img src="https://github.com/Adnr7/clipforge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-88c0d0" alt="MIT license" /></a>
+  <a href="docs/development.md"><img src="https://img.shields.io/badge/Python-3.10%2B-74a6be" alt="Python 3.10 or newer" /></a>
+  <a href="frontend/package.json"><img src="https://img.shields.io/badge/React-19-b8d7e8" alt="React 19" /></a>
+</p>
 
-[Getting started](#getting-started) · [Usage](#usage) ·
-[Documentation](#documentation) · [Contributing](#contributing) ·
-[MIT license](LICENSE)
+<p align="center">
+  <a href="#getting-started">Get started</a> ·
+  <a href="#see-the-studio">See the studio</a> ·
+  <a href="#how-it-works">Workflow</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
-## Features
+---
 
-- **Import local video or audio**, or a single YouTube video through yt-dlp.
-- **Make manual cuts without AI or transcription**, including silent video.
-- **Find spoken highlights** using Deepgram or local Whisper transcripts and
-  your selected analysis model.
-- **Find visual highlights without speech** using timestamped frame samples
-  and an image-capable model.
-- **Use AI Edit** for project chat, an editing brief, visual recommendations,
-  and a reviewed transcribe/analyze/select/render workflow.
-- **Control output framing**: source, 16:9, 9:16, 1:1, 4:5, 4:3, or 3:2; fit
-  or center-crop; configurable maximum output edge.
-- **Style captions and video** with eight caption presets, typography and
-  placement controls, brightness, contrast, saturation, blur, and sharpening.
-- **Preview and export** H.264 MP4 clips, or download completed selections as
-  a ZIP. Output retains source audio when available.
-- **Manage provider profiles** for DeepSeek, Claude, Gemini, OpenAI,
-  OpenRouter, Groq, Ollama, Deepgram, or custom OpenAI-compatible endpoints.
-- **Choose Dark, Light, or Nord** with a persistent theme preference.
+ClipForge is a **local-first video and audio clipping studio** for desktop or
+browser. Make a manual cut, or give your configured model an audience and a
+takeaway. Review the source evidence, choose framing and captions, and export
+H.264 MP4s or a ZIP of completed clips.
 
-ClipForge does not require an account or subscription. Cloud providers may
-charge for API usage; manual editing needs no API key. Local AI requires
-appropriate models and hardware.
+**No ClipForge account or subscription.** Manual editing needs no API key.
+Cloud providers may charge for usage; local AI needs installed models and
+appropriate hardware. The app is an early-stage **source distribution**;
+browser mode is the easiest starting point.
 
-## Project status
+## See the studio
 
-ClipForge is an early-stage application distributed as source. Browser mode is
-the simplest starting point; desktop mode uses pywebview and requires the
-appropriate native WebView runtime. Standalone installers are not provided.
+### Source, transcript, and evidence — together
 
-AI results are suggestions to review. Visual analysis samples still frames; it
-does not hear music, detect musical beats, or inspect every frame. Reframing is
-fit/center-crop, not face or active-speaker tracking. Timeline editing, subtitle
-file export, and publishing directly to social platforms are not implemented.
+![Dark workspace with source video, timed transcript, and an audience-scored candidate showing opening and payoff evidence](docs/images/workspace-dark.png)
+
+<table>
+  <tr>
+    <td width="50%"><strong>Shape the story in AI Edit</strong><br /><img src="docs/images/ai-edit-dark.png" alt="AI Edit with project chat, an audience brief, and a reviewed visual recommendation" /></td>
+    <td width="50%"><strong>Style the output in Light</strong><br /><img src="docs/images/caption-studio-light.png" alt="Light caption studio with source framing and eight caption presets" /></td>
+  </tr>
+</table>
+
+<details>
+<summary><strong>Explore the project library in Nord</strong></summary>
+
+![Nord project library with imported, transcribed, and analyzed projects](docs/images/library-nord.png)
+
+</details>
+
+<sub>Screenshots show the actual React interface with generated media and synthetic
+project/model responses. [Reproduce the screenshots](docs/testing.md#documentation-screenshots).</sub>
+
+## What you can do
+
+| Capability | In the studio |
+| --- | --- |
+| **Bring your recordings** | Local video/audio upload, external source path, or a single YouTube video via yt-dlp |
+| **Cut without AI** | Create and render exact manual time ranges, including silent video |
+| **Find spoken ideas** | Deepgram or local Whisper → timed evidence → audience-aware scout and critic |
+| **Inspect visual moments** | Bounded timestamped stills with an image-capable model; no transcript required |
+| **Guide an edit** | Project chat, shared audience/goal, visual advice, and reviewed automation |
+| **Preserve or reframe** | Source, 16:9, 9:16, 1:1, 4:5, 4:3, 3:2; fit or center-crop |
+| **Make it readable** | Eight caption presets; font, outline, shadow, background, placement, and word grouping |
+| **Adjust the look** | Brightness, contrast, saturation, blur, sharpening, and exact rendered-frame previews |
+| **Export locally** | H.264 MP4, original source audio when available, and branded ZIP filenames |
+| **Use your connection** | Saved provider profiles, custom models/endpoints, and Dark / Light / Nord themes |
+
+### Choose your editing path
+
+| | Manual | Speech analysis | Visual analysis |
+| --- | --- | --- | --- |
+| Best for | A time range you already know | Interviews, talks, tutorials, podcasts | Demos, silent footage, music videos |
+| Needs transcription | No; only for captions | Yes, with real timestamps | No; speech context is optional |
+| Needs a model | No | Text-capable | Image-capable |
+| Boundary basis | Your start/end values | Supplied transcript units and quotes | Approximate intervals backed by sampled frames |
+| Review | Framing and final export | Relevance, opening, payoff, timing | Visible evidence, framing, timing |
+
+## How it works
+
+```mermaid
+flowchart LR
+  A[Import video or audio] --> B{Choose a path}
+  B --> C[Manual time range]
+  B --> D[Timed speech + audience]
+  B --> E[Sampled frames + audience]
+  D --> F[Scout → critic → local ranking]
+  E --> G[Visual recommendations]
+  C --> H[Review clips and settings]
+  F --> H
+  G --> H
+  H --> I[Render locally with FFmpeg]
+  I --> J[Preview · MP4 · ZIP]
+```
+
+### Audience first, source grounded
+
+Tell ClipForge **who should care** and **what they should take away**. The shared
+audience brief reaches Manual analysis, AI Edit, project chat, and editing-look
+suggestions. Changing fields alone does not call a model.
+
+For speech selection, the model scouts timestamped transcript units, then a
+separate critic call reviews the shortlisted text. Code resolves timestamps,
+validates opening/closing quotes, computes scores, and removes overlaps and
+duplicate topic labels. It returns fewer clips when ideas do not meet the gate.
+
+| Editorial dimension | Weight | Question |
+| --- | ---: | --- |
+| **Audience fit** | **35%** | Does this specific viewer have a reason to care? |
+| Hook | 20% | Does the actual opening earn attention? |
+| Payoff | 20% | Does the clip deliver its promise? |
+| Standalone clarity | 15% | Does it make sense without missing context? |
+| Shareability | 10% | Why might this viewer save or share it? |
+
+Each dimension is scored 0–5; audience fit, payoff, and clarity must each reach
+3. The displayed 0–100 score is an **editorial heuristic**, not a prediction of
+views or retention. The critic uses the same selected model in a separate call.
+Visual analysis has its own single-pass sampled-frame contract.
+[Read the method, limits, and evaluation guide →](docs/audience-selection.md)
 
 ## Getting started
 
-Clone the repository and open its root directory:
+### Prerequisites
+
+| Dependency | Requirement | Used for |
+| --- | --- | --- |
+| Python | **3.10+** | Backend and desktop launcher |
+| Node.js | **22.12+** | Building the interface and browser tests |
+| FFmpeg + FFprobe | On `PATH`, with `libx264`, `drawtext`, and usable fonts | Probe, previews, captions, and export |
+| Native WebView | Optional, platform-specific | Desktop window; browser mode does not need it |
 
 ```bash
 git clone https://github.com/Adnr7/clipforge.git
 cd clipforge
 ```
 
-You can also download the source ZIP from GitHub and extract it locally.
-
-### Prerequisites
-
-| Dependency | Requirement |
-| --- | --- |
-| Python | 3.10 or newer |
-| Node.js | 22.12 or newer, for the frontend build |
-| FFmpeg and FFprobe | On `PATH`, with `libx264`, `drawtext`, and font support |
-
-Install FFmpeg using your operating system's package manager. For example:
+<details>
+<summary><strong>Install FFmpeg</strong></summary>
 
 ```bash
 # Ubuntu / Debian
@@ -79,10 +154,12 @@ brew install ffmpeg
 ```
 
 On Windows, install an FFmpeg build containing FFprobe, add its `bin` directory
-to `PATH`, and open a new terminal. Check that `ffmpeg -version` and
-`ffprobe -version` both work.
+to `PATH`, and open a new terminal. Verify both `ffmpeg -version` and
+`ffprobe -version`.
 
-### 1. Install Python dependencies
+</details>
+
+### 1 · Install the backend
 
 **macOS / Linux**
 
@@ -100,168 +177,139 @@ py -3 -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-For optional **local Whisper transcription**, install its additional dependencies
-in the same environment:
+### 2 · Build the interface
 
 ```bash
-python -m pip install -r requirements-whisper.txt
+npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
-Whisper downloads the selected model on first use. Ollama runs as a separate
-service; install and pull a suitable model if you want local analysis.
-
-### 2. Build the interface
-
-```bash
-cd frontend
-npm ci
-npm run build
-cd ..
-```
-
-### 3. Start ClipForge
-
-With the Python environment activated:
+### 3 · Open the studio
 
 ```bash
 python main.py --web
 ```
 
-Open **http://127.0.0.1:5174** in your browser.
+Open **http://127.0.0.1:5174**. For the native window, use `python main.py` and
+follow [pywebview's platform installation guide](https://pywebview.flowrl.com/guide/installation.html).
 
-For the native desktop window, run `python main.py` instead. See
-[pywebview's installation guide](https://pywebview.flowrl.com/guide/installation.html)
-for your operating system's WebView requirements.
+### 4 · Add AI when you need it
 
-### 4. Configure optional AI providers
+Open **Settings → Providers**, save a connection, and activate it.
 
-Open **Settings → Providers**, add a connection, save it, and activate it.
-
-| Task | Configuration |
+| Task | What to configure |
 | --- | --- |
-| Manual cuts and captionless rendering | No AI provider needed |
-| Cloud speech transcription | Deepgram API key |
-| Local speech transcription | Optional Whisper dependencies and model |
-| Speech analysis or project chat | Text-capable analysis model |
-| Visual highlights or recommendations | Image-capable analysis model |
+| Manual cuts / captionless rendering | Nothing — no AI key needed |
+| Cloud transcription | Deepgram API key |
+| Local transcription | `python -m pip install -r requirements-whisper.txt`, then a Whisper profile |
+| Speech selection / project chat | DeepSeek, Claude, Gemini, OpenAI, OpenRouter, Groq, Ollama, or custom OpenAI-compatible model |
+| Visual selection / recommendations | An image-capable model on a supported connection |
 
-Provider availability does not guarantee that every model supports images.
-Select a vision model for visual analysis; text-only models cannot inspect the
-sampled frames. API keys can be configured through Settings, so a root `.env`
-file is not required for normal use.
+Whisper downloads its selected model on first use. Ollama runs as a separate
+service. A provider can offer both text-only and vision models; choose the
+actual capability you need. [Provider setup and transport details](docs/development.md#provider-connections).
 
-## Usage
+## Make your first clip
 
-### Make your first clip without AI
+### Without AI
 
-1. Create a project and import a local video or audio file.
-2. Choose **Create manual cut**, enter start/end times, and save the cut.
-3. Open **Caption Controls & filters** to choose output framing and adjustments.
-   Keep captions off if the project has no transcript.
+1. Create a project and import media.
+2. Choose **Create manual cut**, set start/end times, and save.
+3. Open **Caption Controls & filters**; choose framing and the look. Keep captions
+   off when no speech transcript exists.
 4. Select the clip and choose **Render selected**.
-5. Preview the completed clip, then download its MP4 or the selected clips ZIP.
+5. Preview the completed artifact, then download its MP4 or the selected-clips ZIP.
 
-### Find highlights with AI
+### With an audience brief
 
-1. Import media and configure an analysis provider.
-2. Choose **Speech** and transcribe before analysis, or choose **Video visuals**
-   with an image-capable model. Visual analysis does not require a transcript.
-3. Choose **Find clip candidates** and review their boundaries and rationale.
-4. Select candidates, adjust the look, render, and download.
+1. Set **Audience & takeaway** in Manual, or the shared fields in **AI Edit**.
+2. Transcribe for speech selection, or choose **Video visuals** with a vision model.
+3. Run analysis; review boundaries, audience benefit, rubric, and source evidence.
+4. Choose the clips and settings, render, and inspect the result.
 
-For guided editing, switch to **AI Edit**, describe your audience and goal,
-request recommendations if useful, and review the plan before starting. AI
-settings are applied only when you choose **Use AI recommended settings**.
-Stopping automation prevents future steps; jobs already accepted by the server
-may finish.
+AI Edit defaults to **Auto** — speech when available, otherwise sampled frames —
+and **fresh analysis** for the current audience. Review the plan before starting.
+**Use AI recommended settings** is opt-in; reusing existing candidates does not
+rerank them for a new audience. [Detailed AI Edit behavior](docs/ai-edit-mode.md).
 
-Audience and goal each allow 1,000 characters; notes allow 2,000. The complete
-brief, including destination and editing options, reaches chat and analysis
-without truncation. If a chat answer would overflow notes, ClipForge keeps the
-unsent message and asks you to shorten the notes before sending.
+New projects preserve source framing without upscaling. **Fit** keeps the whole
+image and may add bars; **center-crop** trims edges. Neither stretches footage.
+Audio-only clips use a black video canvas. Completed MP4s retain their rendered
+look; changing controls requires a new render.
 
-New projects preserve source framing without upscaling by default. **Fit** keeps
-the full image and may add bars; **center-crop** trims edges. Neither stretches
-the video. Audio-only clips render onto a black video canvas.
-
-## Configuration and data
+## Local data and processing
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `DATA_DIR` | `~/.clipforge` | Database, saved provider configuration, and managed media |
-| `CLIPFORGE_PORT` | `5174` | Local server port |
+| `DATA_DIR` | `~/.clipforge` | SQLite database, saved settings/profiles, managed media and renders |
+| `CLIPFORGE_PORT` | `5174` | Local backend and built interface |
 
-[`.env.example`](.env.example) lists optional environment-based provider settings.
-If you use it, copy it to `.env` and replace the empty values locally. Settings
-saved in `DATA_DIR/.env` take precedence over root `.env` defaults on startup.
-Set `DATA_DIR` before launching if you want another storage location.
+API keys can be saved in Settings; a root `.env` is optional.
+[`.env.example`](.env.example) documents defaults. Saved `DATA_DIR/.env` values
+take precedence over root `.env` at startup. Set `DATA_DIR` before launching to
+use another storage location.
 
-## Privacy and processing
-
-Imports, the project database, and rendered artifacts live on your machine.
-What is sent to a provider depends on the feature you choose:
-
-| Feature | Provider receives |
+| Feature | Processing / provider payload |
 | --- | --- |
-| Deepgram transcription | Extracted audio |
-| Cloud speech analysis | Transcript and editing brief |
-| Cloud project chat | Project metadata, brief, chat history, and optional speech context |
-| Cloud visual analysis | Bounded timestamped JPEG samples and optional text context |
-| Local Whisper / local Ollama | Processing stays on the local server after model installation |
+| Manual cuts, previews, renders, ZIPs | Local files and FFmpeg |
+| Deepgram transcription | Extracted audio sent to Deepgram |
+| Cloud speech selection | Timed transcript windows, shortlisted clip text, and editing brief |
+| Cloud project chat | Allowlisted technical metadata, optional transcript, brief and history |
+| Cloud visual analysis | Bounded timestamped JPEGs and optional text context; no audio |
+| Local Whisper / local Ollama | Local inference after installing models |
 
-Credentials are stored locally in dotenv settings and provider profiles; this
-is not an encrypted secrets vault. Settings/status APIs do not return saved
-keys. The app has no application telemetry and binds to localhost. YouTube
-import contacts YouTube through yt-dlp; its license metadata is informational.
+The app has no application telemetry and binds to localhost. Credentials are
+stored locally, **not encrypted at rest**, and are write-only through the API.
+YouTube import contacts YouTube through yt-dlp.
+[Data architecture](docs/architecture.md) · [Security and private reporting](SECURITY.md).
 
-## Development and testing
+## Project scope
 
-Install backend development dependencies:
+| Available today | Future work |
+| --- | --- |
+| Browser/pywebview interface, source installation | Standalone installers and native distribution verification |
+| Sampled-still visual analysis | Full-video, music/beat, or continuous-motion understanding |
+| Fit / center-crop reframing | Face or active-speaker tracking |
+| Manual ranges and burned-in captions | Timeline editor and SRT/VTT export |
+| Local MP4 / ZIP downloads | Direct publishing to social platforms |
+
+See the [roadmap](docs/roadmap.md) for proposed improvements.
+
+## Build with us
 
 ```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q tests
+
+npm --prefix frontend run build
+npm --prefix frontend run lint
+# First time: install Chromium and supported-platform dependencies
+npm --prefix frontend exec -- playwright install --with-deps chromium
+npm --prefix frontend run test:e2e
 ```
 
-Run the backend with `python main.py --web` and the frontend in another terminal
-with `cd frontend` followed by `npm run dev`. The development interface is at
-http://localhost:5173 and proxies API requests to the backend on port 5174.
+Backend checks include real FFmpeg processing of synthetic media. Browser checks
+use controlled API responses. CI runs Python 3.10/3.12 and Node 22; live model
+quality and the native desktop runtime need separate evaluation.
 
-Frontend checks:
+| Start here | What you will find |
+| --- | --- |
+| [Documentation hub](docs/README.md) | Guides organized by task |
+| [Contributing](CONTRIBUTING.md) | First contribution, change guidelines, PR workflow |
+| [Development](docs/development.md) | Setup, directory map, providers, migrations, debugging |
+| [Architecture](docs/architecture.md) | System diagram, persistence, jobs, render identity |
+| [API reference](docs/api.md) | Endpoints, payloads, job polling, render and export examples |
+| [Audience selection](docs/audience-selection.md) | Scout/critic method, scoring, evidence, limits, evaluation |
+| [Testing](docs/testing.md) | Focused/full checks, fixtures, screenshots, CI |
+| [Troubleshooting](docs/troubleshooting.md) | Common setup, model, media, and job problems |
+| [UI review](docs/ui-review.md) | Themes, responsive layouts, accessibility review |
 
-```bash
-cd frontend
-npm ci
-npx playwright install --with-deps chromium
-npm run build
-npm run lint
-npm run test:e2e
-```
+Bug reports, focused fixes, and documentation improvements are welcome.
+[Open an issue](https://github.com/Adnr7/clipforge/issues/new/choose), read
+[CONTRIBUTING.md](CONTRIBUTING.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Maintainers can use the [publishing guide](docs/publishing.md).
 
-Backend tests generate synthetic media and include real FFmpeg checks. Provider
-responses are controlled fixtures; passing them does not verify a live model or
-native installer. CI runs backend tests, frontend build/lint, and browser tests.
-See [Contributing](CONTRIBUTING.md) for the development workflow.
+---
 
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [AI Edit integration and API contracts](docs/ai-edit-mode.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [UI review](docs/ui-review.md)
-- [Roadmap](docs/roadmap.md)
-- [Credits and dependencies](docs/credits.md)
-
-## Contributing
-
-Bug reports, focused fixes, documentation improvements, and feature proposals
-are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), use the issue templates,
-and open a pull request with a clear description and relevant verification.
-Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
-
-For vulnerability reporting, see [SECURITY.md](SECURITY.md).
-
-## License
-
-ClipForge is released under the [MIT License](LICENSE). Third-party dependencies,
-external tools, and model weights retain their respective licenses.
+**MIT licensed.** [License](LICENSE) · [Credits and dependencies](docs/credits.md).
+Third-party tools, services, and model weights retain their own licenses.
