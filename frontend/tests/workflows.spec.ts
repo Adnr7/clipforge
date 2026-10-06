@@ -476,7 +476,7 @@ test('caption editor uses the render contract, exact JPEG preview, caption/outpu
 test('Video & AI suggestions generates a POST and applies the returned look', async ({ page }) => {
   const state = await mockApi(page); await page.goto('/'); await page.getByRole('button', { name: `Open project ${projectFixture.name}` }).click(); await page.getByRole('button', { name: 'Caption Controls & filters', exact: true }).click()
   const editor = page.getByRole('dialog', { name: 'Caption Controls & video filters' }); await editor.getByRole('button', { name: 'Video & AI suggestions', exact: true }).click(); await editor.getByLabel('Editing brief', { exact: true }).fill('Readable captions with a restrained documentary look'); await editor.getByRole('button', { name: 'Suggest editing settings', exact: true }).click()
-  await expect.poll(() => state.suggestionRequests).toHaveLength(1); expect(state.suggestionRequests[0]).toEqual({ brief: 'Readable captions with a restrained documentary look' }); await expect(editor.getByText('A restrained look for Readable captions with a restrained documentary look.')).toBeVisible()
+  await expect.poll(() => state.suggestionRequests).toHaveLength(1); expect(state.suggestionRequests[0]).toEqual({ brief: 'Readable captions with a restrained documentary look', audienceBrief: { audience: '', goal: '', notes: '' } }); await expect(editor.getByText('A restrained look for Readable captions with a restrained documentary look.')).toBeVisible()
   await editor.getByRole('button', { name: 'Apply suggestion to controls', exact: true }).click(); await expect(editor.getByLabel('brightness', { exact: true })).toHaveValue('0.3'); await expect(editor.getByLabel('contrast', { exact: true })).toHaveValue('1.2')
 })
 

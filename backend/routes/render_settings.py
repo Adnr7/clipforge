@@ -19,6 +19,7 @@ from backend.services.render_settings import (
 )
 from backend.services.provider_service import get_active_profile, runtime_profile, sanitize_provider_error
 from backend.services import suggestion_service, llm_service
+from backend.services.clip_selection_service import validate_audience_brief
 
 
 render_settings_bp = Blueprint('render_settings', __name__)
@@ -160,11 +161,12 @@ def generate_filter_suggestion(project_id):
     try:
         project = _get_project(db, project_id)
         data = _json_object()
-        if set(data) - {'brief'}:
-            raise _RouteError('Only brief is accepted; suggestions are based on transcript context')
+        if set(data) - {'brief', 'audienceBrief'}:
+            raise _RouteError('Only brief and audienceBrief are accepted; suggestions use transcript context')
         brief = data.get('brief', '')
         if not isinstance(brief, str) or len(brief) > suggestion_service.BRIEF_LIMIT or '\x00' in brief:
             raise _RouteError('brief must be text of at most 2000 characters')
+        audience_brief = validate_audience_brief(data.get('audienceBrief'))
         row = db.execute('''SELECT raw_json FROM transcripts WHERE project_id=?
                             ORDER BY created_at DESC, rowid DESC LIMIT 1''', (project_id,)).fetchone()
         if row is None:
@@ -186,7 +188,8 @@ def generate_filter_suggestion(project_id):
         try:
             result = suggestion_service.generate_suggestion(
                 transcript, duration, brief.strip(), provider, profile,
-                source_metadata=json.loads(project.get('source_metadata_json') or '{}'))
+                source_metadata=json.loads(project.get('source_metadata_json') or '{}'),
+                audience_brief=audience_brief)
         except Exception as exc:
             message = sanitize_provider_error(exc)
             # Providers sometimes echo credentials in their errors.

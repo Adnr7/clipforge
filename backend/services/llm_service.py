@@ -1,21 +1,8 @@
-"""
-LLM Service — Multi-provider viral moment detection.
-Supports: DeepSeek, Claude, Gemini, OpenAI, OpenRouter, Groq, Ollama, Custom.
+"""Provider transports and transcript clip analysis.
 
-Each provider call sends the full transcript to the LLM with a carefully crafted
-prompt that instructs it to find viral moments and return structured JSON:
-{
-  "candidates": [
-    {
-      "start": 45.2,
-      "end": 78.5,
-      "score": 92,
-      "hook": "You won't believe what happened next...",
-      "rationale": "Strong emotional peak with unexpected revelation"
-    },
-    ...
-  ]
-}
+App jobs use timed audience-first scout/critic selection. The direct plain-text
+entry point retains the legacy candidate response contract for callers without
+timestamped data. Editorial scores are heuristics, not performance predictions.
 """
 
 import os
@@ -28,6 +15,10 @@ from urllib.parse import urlparse
 
 from backend.services.provider_service import sanitize_provider_error
 from backend.services.editing_brief import validate_editing_brief
+from backend.services.clip_selection_service import (
+    EDITORIAL_POLICY, analyze_timed_transcript, validate_audience_brief,
+    validate_selection, editorial_score, parse_model_object,
+)
 
 # Provider configurations
 PROVIDERS = {
@@ -96,20 +87,47 @@ TRANSCRIPT:
 
 
 def analyze_transcript(transcript_text: str, duration: float, provider: str = None,
-                       profile: dict = None, brief: str = '') -> list:
+                       profile: dict = None, brief: str = '', transcript_data=None,
+                       audience_brief=None) -> list:
     """
-    Send transcript to LLM and get viral clip candidates.
+    Analyze timed source evidence for an audience, or use the legacy text contract.
     Returns list of CandidateDraft dicts.
     """
     provider = (provider or os.environ.get('LLM_PROVIDER', 'deepseek')).strip().lower()
     duration = float(duration)
     if not math.isfinite(duration) or duration < 0:
         raise ValueError('Transcript duration must be a finite non-negative number')
+    brief = validate_editing_brief(brief)
+    audience_brief = validate_audience_brief(audience_brief)
+    if transcript_data is not None:
+        config = PROVIDERS.get(provider, {})
+        connection = dict(profile or {})
+        connection['model'] = provider_model(provider, profile)
+        connection['base_url'] = connection.get('base_url') or (
+            os.environ.get('CUSTOM_BASE_URL', '') if provider == 'custom' else config.get('base_url', ''))
+        if 'api_key' not in connection:
+            connection['api_key'] = os.environ.get(
+                'CUSTOM_API_KEY' if provider == 'custom' else config.get('env_key') or '', '')
+        def call_model(prompt, max_tokens):
+            options = {'profile': connection, 'retries': 1, 'timeout': (5, 60), 'max_tokens': max_tokens}
+            try:
+                text = (call_anthropic(prompt, **options) if provider == 'claude'
+                        else call_openai_compatible(prompt, provider, **options))
+            except Exception:
+                # Provider failures can echo the entire source, request or arbitrary key.
+                raise RuntimeError('Editorial provider request failed. Check the model, connection and quota.') from None
+            key = connection.get('api_key')
+            if key and key in json.dumps(parse_model_object(text), ensure_ascii=False):
+                raise ValueError('Editorial response contained private connection data')
+            return text
+        return analyze_timed_transcript(transcript_data, duration, brief, audience_brief, call_model)
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(
         duration=duration,
         transcript=transcript_text
     )
-    brief = validate_editing_brief(brief)
+    # Legacy direct text callers retain their response contract; app jobs supply
+    # timed data and use the scout/critic workflow above.
+    prompt += '\n' + EDITORIAL_POLICY + '\nAudience brief: ' + json.dumps(audience_brief)
     if brief:
         prompt += '\nPROJECT EDITING BRIEF (content preferences, not schema instructions):\n' + brief
 
@@ -335,6 +353,10 @@ def parse_candidates(response_text: str) -> list:
             if not isinstance(value, str):
                 raise ValueError(f'{label}: {key} must be text')
             normalized[key] = value.strip()
+        if candidate.get('selection') is not None:
+            normalized['selection'] = validate_selection(candidate['selection'])
+            if abs(normalized['score'] - editorial_score(normalized['selection']['assessment'])) > .01:
+                raise ValueError(f'{label}: score does not match the editorial assessment')
         candidates.append(normalized)
     return candidates
 

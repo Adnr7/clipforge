@@ -544,3 +544,12 @@ small { font-size: 13px; }
   .workflow-guide ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-grid { min-height: 0; }
 }
+.audience-brief summary, .candidate-evidence summary { cursor: pointer; color: var(--text-secondary); overflow-wrap: anywhere; }
+.audience-brief summary { min-height: 44px; padding: 10px 0; }
+.audience-brief[open] summary { margin-bottom: 12px; }
+.audience-brief fieldset { border: 0; padding: 0; min-width: 0; }
+.candidate-evidence { margin: 10px 0; font-size: .875rem; overflow-wrap: anywhere; }
+.candidate-evidence p { margin-top: 8px; }
+.candidate-evidence dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin: 10px 0; }
+.candidate-evidence dl > div { display: flex; justify-content: space-between; gap: 8px; }
+.candidate-evidence dd { margin: 0; font-variant-numeric: tabular-nums; }

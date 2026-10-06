@@ -1,4 +1,5 @@
-import { api, type Candidate, type CaptionSettings, type JobStatus, type OutputSettings, type ProjectDetail, type RenderOptions, type VideoFilters } from './client'
+import { api, type AudienceBrief, type Candidate, type CaptionSettings, type ClipSelection, type JobStatus, type OutputSettings, type ProjectDetail, type RenderOptions, type VideoFilters } from './client'
+import { audienceFromBrief } from './audience'
 import { isActiveJob, isFailedJob } from './jobs'
 
 export interface AiEditBrief {
@@ -10,7 +11,7 @@ export interface AiEditBrief {
   length: 'any' | '15-30' | '30-60'
   captions: boolean
   reuseCandidates: boolean
-  analysisMode: 'visual' | 'transcript'
+  analysisMode: 'auto' | 'visual' | 'transcript'
 }
 
 export interface AiEditMessage {
@@ -30,7 +31,8 @@ export interface VisualRecommendation {
   aspectRatio: { mode: 'preserve' | 'crop' | 'pad'; ratio: 'source' | '9:16' | '16:9' | '1:1' | '4:5' }
   videoFilters: Partial<VideoFilters>
   captionSettings: Partial<CaptionSettings>
-  candidates: { start: number; end: number; score: number; hook: string; rationale: string }[]
+  candidates: { start: number; end: number; score: number; hook: string; rationale: string; selection?: ClipSelection }[]
+  audience?: string
   rationale: string
   analysisBasis: 'sampled-frames'
   source: { width: number; height: number; durationSeconds: number; hasVideo: boolean; hasAudio: boolean }
@@ -82,17 +84,20 @@ export const aiEditApi = {
   chat: async (projectId: string, message: string, messages: AiEditMessage[], brief: AiEditBrief, signal?: AbortSignal): Promise<AiEditChatReply> => {
     const value = await aiEditRequest<AiEditChatReply>(projectId, 'ai-edit/chat', {
       message, messages: messages.map(({ role, text }) => ({ role, text })), brief: formatAiEditBrief(brief),
+      audienceBrief: audienceFromBrief(brief),
     }, signal)
     if (!value || typeof value.message !== 'string' || !value.message.trim() || typeof value.model !== 'string'
       || !['metadata', 'transcript'].includes(value.basis)) throw new Error('The chat endpoint returned an incomplete model reply. Please try again.')
     return value
   },
   recommendations: async (projectId: string, brief: AiEditBrief, signal?: AbortSignal): Promise<VisualRecommendation> => {
-    const value = await aiEditRequest<VisualRecommendation>(projectId, 'ai-edit/recommendations', { brief: formatAiEditBrief(brief) }, signal)
+    const value = await aiEditRequest<VisualRecommendation>(projectId, 'ai-edit/recommendations', {
+      brief: formatAiEditBrief(brief), audienceBrief: audienceFromBrief(brief),
+    }, signal)
     if (!isVisualRecommendation(value)) throw new Error('The recommendation endpoint returned an incomplete visual response. Please try again.')
     return value
   },
-  analyze: (projectId: string, options: { mode: 'visual' | 'transcript'; brief: string; provider?: string }, signal?: AbortSignal) =>
+  analyze: (projectId: string, options: { mode: 'visual' | 'transcript'; brief: string; provider?: string; audienceBrief?: AudienceBrief }, signal?: AbortSignal) =>
     aiEditRequest<{ status: string; model?: string }>(projectId, 'analyze', options, signal),
 }
 
@@ -152,7 +157,7 @@ export interface AiEditPlan {
 
 export const defaultAiBrief: AiEditBrief = {
   audience: '', goal: '', notes: '', platform: 'shorts', clipCount: 3,
-  length: 'any', captions: true, reuseCandidates: true, analysisMode: 'visual',
+  length: 'any', captions: true, reuseCandidates: false, analysisMode: 'auto',
 }
 
 export function transcriptHasSpeech(detail: ProjectDetail): boolean {
@@ -193,6 +198,11 @@ function sourceHasVideo(detail: ProjectDetail): boolean | undefined {
   if (visual) return visual.source.hasVideo
   try { return JSON.parse(detail.project.source_metadata_json || 'null')?.has_video }
   catch { return undefined }
+}
+
+function resolveAnalysisMode(brief: AiEditBrief, detail: ProjectDetail): 'transcript' | 'visual' {
+  if (brief.analysisMode !== 'auto') return brief.analysisMode
+  return transcriptHasSpeech(detail) || sourceHasVideo(detail) === false ? 'transcript' : 'visual'
 }
 
 export function createAiEditPlan(detail: ProjectDetail, brief: AiEditBrief, renderOptions: RenderOptions, recommendation: VisualRecommendation | null = null): AiEditPlan {
@@ -270,7 +280,7 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
     if (isActiveJob(detail.jobs?.transcription.status) || isActiveJob(detail.jobs?.analysis.status) || detail.clips.some((clip) => isActiveJob(clip.status))) {
       throw new Error('The project has an active job. Wait for it to finish, then review a fresh plan.')
     }
-    let analysisMode = plan.brief.analysisMode
+    let analysisMode = resolveAnalysisMode(plan.brief, detail)
     let renderOptions = structuredClone(plan.renderOptions)
     if (plan.transcribe) {
       report('running', 'Transcribing source audio with your configured transcription provider…')
@@ -301,13 +311,15 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
 
     step = 'analyze'
     if (plan.analyze) {
+      if (plan.brief.analysisMode === 'auto') analysisMode = resolveAnalysisMode(plan.brief, detail)
       if (analysisMode === 'transcript' && !transcriptHasSpeech(detail)) {
         if (sourceHasVideo(detail) === false) throw new Error('Transcript analysis needs usable speech. No video frames are available in this audio-only source.')
         analysisMode = 'visual'
       }
       report('running', analysisMode === 'visual' ? 'Your visual model is inspecting sampled video frames with your editing brief…'
         : 'Your analysis model is ranking transcript moments with your editing brief…')
-      const analysis = await aiEditApi.analyze(plan.projectId, { mode: analysisMode, brief: formatAiEditBrief(plan.brief) }, signal)
+      const analysis = await aiEditApi.analyze(plan.projectId, { mode: analysisMode,
+        brief: formatAiEditBrief(plan.brief), audienceBrief: audienceFromBrief(plan.brief) }, signal)
       await callbacks.refresh()
       detail = await waitForProject(plan.projectId, signal, (value) => jobDone(value.jobs?.analysis, 'Analysis'))
       const visual = analysisMode === 'visual' ? projectVisualRecommendation(detail) : null

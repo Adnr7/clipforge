@@ -94,6 +94,10 @@ async function setup(page: Page, options: { hasTranscript?: boolean; hasCandidat
       if (method === 'PUT') state.renderSettings[projectId] = { ...state.renderSettings[projectId], ...body() }
       return json(state.renderSettings[projectId])
     }
+    if (path.endsWith('/filter-suggestions/generate')) return json({ id: 'audience-look', projectId: 'p1',
+      settings: fallbackRenderContract.videoFilters.defaults, captionSettings: null, source: 'ai',
+      model: 'fixture-editor', rationale: 'Readable, restrained settings for the specified audience.',
+      applied: false, createdAt: '2026-10-05' }, 201)
     if (path.endsWith('/ai-edit/chat')) {
       if (state.chatHtml) return route.fulfill({ status: state.chatStatus, contentType: 'text/html', body: '<html><body>Gateway secret debug dump</body></html>' })
       return json(state.chatStatus === 200 ? { message: `For this project, emphasize ${body().message}.`, model: 'fixture-project-chat', basis: state.transcript ? 'transcript' : 'metadata' } : { error: state.chatError }, state.chatStatus)
@@ -141,6 +145,9 @@ async function openAi(page: Page, project = projects[0]) {
 async function fillBrief(page: Page) {
   await page.getByLabel('Who is the audience?', { exact: true }).fill('First-time founders')
   await page.getByLabel('What should viewers take away?', { exact: true }).fill('One useful, practical idea')
+  // Reuse-oriented fixtures opt in explicitly; fresh analysis is now the default.
+  const reuse = page.getByLabel('Reuse existing candidates', { exact: true })
+  if (await reuse.count()) await reuse.check()
 }
 async function confirmPlan(page: Page, replace = false, useAiSettings = false) {
   await page.getByRole('button', { name: 'Review plan', exact: true }).click()
@@ -154,6 +161,74 @@ async function confirmPlan(page: Page, replace = false, useAiSettings = false) {
   }
   await review.getByRole('button', { name: 'Start automated edit' }).click()
 }
+
+test('audience brief is shared across Manual and AI buttons, and changing it alone makes no model request', async ({ page }) => {
+  const state = await setup(page, { hasTranscript: true, hasCandidates: true })
+  await page.goto('/')
+  await page.getByRole('button', { name: `Open project ${projects[0].name}` }).click()
+  await page.locator('.audience-brief summary').click()
+  await page.getByLabel('Target audience', { exact: true }).fill('First-time founders')
+  await page.getByLabel('Viewer takeaway', { exact: true }).fill('Make a clear customer pitch')
+  await page.getByLabel('Audience notes & exclusions', { exact: true }).fill('Avoid sponsor reads')
+  expect(state.requests).toEqual([])
+  await page.getByRole('button', { name: 'AI Edit', exact: true }).click()
+  await expect(page.getByLabel('Who is the audience?', { exact: true })).toHaveValue('First-time founders')
+  await expect(page.getByLabel('What should viewers take away?', { exact: true })).toHaveValue('Make a clear customer pitch')
+  await expect(page.getByLabel('Reuse existing candidates', { exact: true })).not.toBeChecked()
+  await expect(page.getByRole('combobox', { name: 'Clip analysis', exact: true })).toHaveValue('auto')
+  await page.getByRole('button', { name: 'Get visual recommendation' }).click()
+  await expect(page.getByRole('region', { name: 'AI recommendation' })).toContainText('fixture-visual-preview')
+  expect(state.requests.find((request) => request.path.endsWith('/ai-edit/recommendations'))?.body.audienceBrief)
+    .toEqual({ audience: 'First-time founders', goal: 'Make a clear customer pitch', notes: 'Avoid sponsor reads' })
+  await page.getByRole('button', { name: 'Manual', exact: true }).click()
+  await page.getByRole('button', { name: 'Caption Controls & filters', exact: true }).click()
+  await page.getByRole('button', { name: 'Video & AI suggestions', exact: true }).click()
+  await page.getByLabel('Editing brief', { exact: true }).fill('Keep captions readable')
+  await page.getByRole('button', { name: 'Suggest editing settings', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('Readable, restrained settings for the specified audience.')
+  expect(state.requests.find((request) => request.path.endsWith('/filter-suggestions/generate'))?.body)
+    .toEqual({ brief: 'Keep captions readable', audienceBrief: {
+      audience: 'First-time founders', goal: 'Make a clear customer pitch', notes: 'Avoid sponsor reads',
+    } })
+  await page.getByRole('button', { name: 'Done editing controls', exact: true }).click()
+  state.holdAnalysis = true
+  await page.getByRole('button', { name: 'Analyze again', exact: true }).click()
+  await page.getByRole('button', { name: 'Replace and analyze', exact: true }).click()
+  await expect.poll(() => state.events).toEqual(['analyze'])
+  expect(state.requests.find((request) => request.path.endsWith('/analyze'))?.body)
+    .toEqual({ mode: 'transcript', brief: '', audienceBrief: {
+      audience: 'First-time founders', goal: 'Make a clear customer pitch', notes: 'Avoid sponsor reads',
+    } })
+})
+
+test('audience evidence explains a candidate and remains readable with open brief/evidence on mobile', async ({ page }, testInfo) => {
+  const state = await setup(page, { hasTranscript: true, hasCandidates: true })
+  state.candidates[1].score = 89
+  state.candidates[1].selection = {
+    method: 'audience-first-v1', audience: 'First-time founders', audienceInferred: false,
+    audienceReason: 'The complete example teaches a clear customer pitch.', topic: 'Customer pitch',
+    assessment: { audienceFit: 5, hook: 4, payoff: 5, clarity: 4, shareability: 3 },
+    evidence: { basis: 'transcript', openingQuote: 'Lead with the customer problem.', closingQuote: 'Show one example of the result.' },
+  }
+  await page.goto('/'); await page.getByRole('button', { name: `Open project ${projects[0].name}` }).click()
+  await page.locator('.audience-brief summary').click()
+  await page.getByLabel('Target audience', { exact: true }).fill('First-time founders')
+  await page.getByLabel('Viewer takeaway', { exact: true }).fill('A clear customer pitch')
+  await page.getByText('Audience fit & source evidence', { exact: true }).click()
+  const evidence = page.locator('.candidate-evidence')
+  await expect(evidence).toContainText('The complete example teaches a clear customer pitch.')
+  await expect(evidence).toContainText('5/5')
+  await expect(evidence).toContainText('Lead with the customer problem.')
+  for (const theme of ['dark', 'light', 'nord']) {
+    await page.getByLabel('Color theme').selectOption(theme)
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 960 })
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await expect.poll(() => evidence.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`audience-${theme}-${width}.png`), fullPage: true })
+    }
+  }
+})
 
 test('real project chat sends answers and history, preserves Manual state, and review never starts jobs', async ({ page }) => {
   const state = await setup(page, { hasTranscript: true, hasCandidates: true })
@@ -182,8 +257,9 @@ test('real project chat sends answers and history, preserves Manual state, and r
   expect(chatRequests[2].body.brief).toContain('Goal: A practical takeaway')
   expect(chatRequests[2].body.brief).toContain('Keep the music and avoid exaggerated cuts')
   expect(chatRequests[2].body.messages).toEqual(expect.arrayContaining([{ role: 'user', text: 'New founders' }, { role: 'model', text: 'For this project, emphasize New founders.' }]))
+  await page.getByLabel('Reuse existing candidates', { exact: true }).check()
   await page.getByRole('button', { name: 'Review plan', exact: true }).click()
-  await expect(page.getByRole('dialog')).toContainText('Reuse existing candidates without replacing them.')
+  await expect(page.getByRole('dialog')).toContainText('Reuse existing candidates without reranking for this audience.')
   await page.getByRole('button', { name: 'Back to brief' }).click()
   expect(state.events).toEqual([])
   expect(state.requests.every((request) => request.path.endsWith('/ai-edit/chat'))).toBe(true)
@@ -211,7 +287,7 @@ test('real project chat sends answers and history, preserves Manual state, and r
   }
 })
 
-test('confirmed automation transcribes for captions, visually analyzes, selects by length, and preserves source output', async ({ page }) => {
+test('confirmed automation transcribes for captions, auto selects speech content, selects by length, and preserves source output', async ({ page }) => {
   const state = await setup(page); state.holdTranscription = true
   await openAi(page); await fillBrief(page)
   await page.getByLabel('Number of clips').selectOption('1'); await page.getByLabel('Preferred clip length').selectOption('15-30')
@@ -225,7 +301,8 @@ test('confirmed automation transcribes for captions, visually analyzes, selects 
   await expect(page.getByText('Automated edit complete. 1 MP4 is ready to review.', { exact: true })).toBeVisible({ timeout: 20000 })
   expect(state.events).toEqual(['transcribe', 'analyze', 'select', 'render:c2'])
   expect(state.requests.find((request) => request.path.endsWith('/candidates'))?.body).toEqual({ selectedIds: ['c2'] })
-  expect(state.requests.find((request) => request.path.endsWith('/analyze'))?.body).toMatchObject({ mode: 'visual', brief: expect.stringContaining('Goal: One useful, practical idea') })
+  expect(state.requests.find((request) => request.path.endsWith('/analyze'))?.body).toMatchObject({ mode: 'transcript', brief: expect.stringContaining('Goal: One useful, practical idea'),
+    audienceBrief: { audience: 'First-time founders', goal: 'One useful, practical idea', notes: '' } })
   expect(state.requests.find((request) => request.path.endsWith('/render/c2'))?.body).toMatchObject({ captionStyle: 'classic', captionSettings: { enabled: true }, outputSettings: { mode: 'source', aspectRatio: 'source', fit: 'contain', maxDimension: 1920 } })
   expect(state.requests.some((request) => request.path.endsWith('/render-settings'))).toBe(false)
   await expect(page.getByRole('link', { name: 'Download completed edits (1)' })).toHaveAttribute('href', '/api/projects/p1/export?clipIds=render-c2')
@@ -390,7 +467,7 @@ test('music/no-transcript visual automation skips transcription and passes throu
   const outputSettings: OutputSettings = { mode: 'manual', aspectRatio: '4:5', fit: 'contain', maxDimension: 1280 }
   const state = await setup(page, { outputSettings }); state.holdTranscription = true; state.holdAnalysis = true
   await openAi(page); await fillBrief(page)
-  await expect(page.getByRole('combobox', { name: 'Clip analysis', exact: true })).toHaveValue('visual')
+  await expect(page.getByRole('combobox', { name: 'Clip analysis', exact: true })).toHaveValue('auto')
   await page.getByLabel('Burn in captions', { exact: true }).uncheck()
   await page.getByLabel('Number of clips').selectOption('1')
   await page.getByLabel('Topics, tone & things to avoid').fill('Keep the full performance, including the music.')
@@ -402,7 +479,7 @@ test('music/no-transcript visual automation skips transcription and passes throu
   await expect(page.getByText('Automated edit complete. 1 MP4 is ready to review.', { exact: true })).toBeVisible({ timeout: 20000 })
   expect(state.transcript).toBeNull()
   expect(state.events).toEqual(['analyze', 'select', 'render:c1'])
-  expect(state.requests.find((request) => request.path.endsWith('/analyze'))?.body).toEqual({ mode: 'visual', brief: expect.stringContaining('Keep the full performance, including the music.') })
+  expect(state.requests.find((request) => request.path.endsWith('/analyze'))?.body).toMatchObject({ mode: 'visual', brief: expect.stringContaining('Keep the full performance, including the music.') })
   expect(state.requests.find((request) => request.path.endsWith('/render/c1'))?.body).toMatchObject({
     captionSettings: { enabled: false }, outputSettings, videoFilters: fallbackRenderContract.videoFilters.defaults,
   })
@@ -416,6 +493,7 @@ for (const useAiSettings of [false, true]) {
     const outputSettings: OutputSettings = { mode: 'manual', aspectRatio: '16:9', fit: 'crop', maxDimension: 1280 }
     const state = await setup(page, { hasTranscript: true, outputSettings })
     await openAi(page); await fillBrief(page)
+    await page.getByRole('combobox', { name: 'Clip analysis', exact: true }).selectOption('visual')
     await page.getByLabel('Number of clips').selectOption('1')
     await page.getByRole('button', { name: 'Get visual recommendation' }).click()
     await expect(page.getByRole('region', { name: 'AI recommendation' })).toContainText('fixture-visual-preview')
@@ -519,7 +597,7 @@ test('full form brief reaches chat, recommendations and automation without losin
     expect(brief).toContain('g'.repeat(1000))
     expect(brief).toContain('Preserve the ending')
     expect(brief).toContain('Platform: Instagram Reels')
-    expect(brief).toContain('Reuse candidates: yes')
+    expect(brief).toContain('Reuse candidates: no')
   }
 })
 

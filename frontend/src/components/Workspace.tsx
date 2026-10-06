@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Download, Scissors, Settings, Sparkles, XCircle } from 'lucide-react'
-import { api, errorMessage, type Candidate, type CaptionSettings, type Clip, type FilterSuggestion, type OutputSettings, type RenderSettingsContract, type TranscriptData, type VideoFilters } from '../api/client'
+import { api, errorMessage, type AudienceBrief, type Candidate, type CaptionSettings, type Clip, type FilterSuggestion, type OutputSettings, type RenderSettingsContract, type TranscriptData, type VideoFilters } from '../api/client'
 import { aiEditApi } from '../api/aiEdit'
+import { loadAudienceBrief } from '../api/audience'
 import { fallbackRenderContract } from '../api/renderDefaults'
 import { isActiveJob, isFailedJob, latestClips } from '../api/jobs'
 import { useProject } from '../hooks/useProject'
@@ -62,6 +63,10 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
   const [filterOverride, setFilterOverride] = useState<VideoFilters | null>(null)
   const [outputOverride, setOutputOverride] = useState<OutputSettings | null>(null)
   const [analysisMode, setAnalysisMode] = useState<'transcript' | 'visual'>('transcript')
+  const [audienceBrief, setAudienceBrief] = useState<AudienceBrief>(() => loadAudienceBrief(projectId))
+  useEffect(() => {
+    try { localStorage.setItem(`clipforge.audience.v1.${projectId}`, JSON.stringify(audienceBrief)) } catch { /* Keep the current draft in memory. */ }
+  }, [audienceBrief, projectId])
   const [suggestions, setSuggestions] = useState<FilterSuggestion[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const [suggestionsStatus, setSuggestionsStatus] = useState<string | null>(null)
@@ -174,7 +179,7 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     }
   })
   const transcribe = () => void run('transcribe', async () => { await api.transcribe(projectId); if (mounted.current) showToast('info', 'Transcription started') })
-  const analyze = () => void run('analyze', async () => { await aiEditApi.analyze(projectId, { mode: effectiveAnalysisMode, brief: '' }); if (mounted.current) showToast('info', effectiveAnalysisMode === 'visual' ? 'Visual analysis started — no transcription required' : 'Transcript analysis started') })
+  const analyze = () => void run('analyze', async () => { await aiEditApi.analyze(projectId, { mode: effectiveAnalysisMode, brief: '', audienceBrief }); if (mounted.current) showToast('info', effectiveAnalysisMode === 'visual' ? 'Audience-first visual analysis started' : 'Audience-first speech analysis started') })
   const requestAnalysis = () => detail?.candidates.length ? setConfirmAnalysis(true) : analyze()
   const reviewSuggestions = async () => {
     if (suggestionsLoading) return
@@ -196,7 +201,7 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     suggestionController.current = controller
     setSuggestionsLoading(true); setSuggestionsStatus('Asking your active analysis provider…')
     try {
-      const suggestion = await api.generateFilterSuggestion(projectId, brief, controller.signal)
+      const suggestion = await api.generateFilterSuggestion(projectId, brief, controller.signal, audienceBrief)
       if (!controller.signal.aborted) { setSuggestions((items) => [suggestion, ...items]); setSuggestionsStatus('Suggestion ready. Review and apply it, then check the rendered preview.') }
     } catch (error) { if (!controller.signal.aborted) setSuggestionsStatus(errorMessage(error)) }
     finally { if (!controller.signal.aborted) setSuggestionsLoading(false) }
@@ -232,10 +237,10 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     {isFailedJob(jobs.analysis.status) && <div className="notice notice-error" role="alert">Analysis failed: {jobs.analysis.error || 'Try finding clip candidates again.'}</div>}
     <div className="workspace-grid" ref={manualGrid} hidden={editMode !== 'manual'}>
       <section className="workspace-panel media-panel" aria-label="Source media"><MediaPlayer projectId={projectId} hasTranscript={!!transcript} onTimeUpdate={setCurrentTime} onTranscribe={transcribe} seekRequest={seekRequest} transcribing={transcribing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} mode={detail.project.transcription_mode} /></section>
-      <section className="workspace-panel transcript-panel" aria-label="Transcript"><TranscriptView transcript={transcript} hasSpeech={hasSpeech} currentTime={currentTime} onSeek={seek} onAnalyze={requestAnalysis} analysisMode={effectiveAnalysisMode} onAnalysisModeChange={setAnalysisMode} hasCandidates={visibleCandidates.length > 0} analyzing={analyzing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} invalid={!!detail.transcript && !transcript} /></section>
+      <section className="workspace-panel transcript-panel" aria-label="Transcript"><TranscriptView transcript={transcript} hasSpeech={hasSpeech} currentTime={currentTime} onSeek={seek} onAnalyze={requestAnalysis} analysisMode={effectiveAnalysisMode} onAnalysisModeChange={setAnalysisMode} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} hasCandidates={visibleCandidates.length > 0} analyzing={analyzing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} invalid={!!detail.transcript && !transcript} /></section>
       <section id="candidate-panel" className="workspace-panel candidates-panel" aria-label="Clip candidates"><CandidateList candidates={visibleCandidates} clips={detail.clips} sourceDuration={detail.project.source_duration || 0} preferredClipIds={renderArtifactIds} onCreateManualCut={createManualCut} onRender={render} onSeek={seek} onSelectToggle={(candidate, checked) => void toggleSelection(candidate, checked)} selectionBusy={selectionBusy} renderBusy={rendering} disabled={aiBusy || processing || !!pending} captionStyle={captionStyle} onOpenControls={() => setControlsOpen(true)} /></section>
     </div>
-    {aiVisited && <AiEditMode detail={detail} active={editMode === 'ai'} busy={processing || rendering || !!pending || selectionBusy || savingControls || controlsOpen || suggestionsLoading} captionSettings={captionSettings} videoFilters={videoFilters} outputSettings={outputSettings} onBusyChange={setAiBusy} onRefresh={refresh} onSelectionSaved={() => setSelectionOverride(null)} onRenderQueued={(candidateId, clipId) => { setRenderArtifactIds((previous) => ({ ...previous, [candidateId]: clipId })); trackClips([clipId]) }} onManual={() => setEditMode('manual')} onOpenControls={() => setControlsOpen(true)} />}
+    {aiVisited && <AiEditMode detail={detail} active={editMode === 'ai'} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} busy={processing || rendering || !!pending || selectionBusy || savingControls || controlsOpen || suggestionsLoading} captionSettings={captionSettings} videoFilters={videoFilters} outputSettings={outputSettings} onBusyChange={setAiBusy} onRefresh={refresh} onSelectionSaved={() => setSelectionOverride(null)} onRenderQueued={(candidateId, clipId) => { setRenderArtifactIds((previous) => ({ ...previous, [candidateId]: clipId })); trackClips([clipId]) }} onManual={() => setEditMode('manual')} onOpenControls={() => setControlsOpen(true)} />}
     {confirmAnalysis && <Modal title="Replace clip candidates?" onClose={() => setConfirmAnalysis(false)} closeOnBackdrop={false}>
       <div className="stack"><p>Analyzing again replaces this project’s candidates and selections after a successful result. Existing rendered clips will no longer be available in this project. Download any clips you want to keep first.</p><div className="form-actions"><button className="btn-secondary" onClick={() => setConfirmAnalysis(false)}>Keep current candidates</button><button className="btn-danger" disabled={processing || rendering || !!pending || selectionBusy} onClick={() => { setConfirmAnalysis(false); analyze() }}>Replace and analyze</button></div></div>
     </Modal>}

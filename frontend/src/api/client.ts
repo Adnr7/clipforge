@@ -29,6 +29,17 @@ export function errorMessage(error: unknown): string {
 }
 
 export type TranscriptionMode = 'local' | 'cloud'
+export interface AudienceBrief { audience: string; goal: string; notes: string }
+export interface ClipSelection {
+  method: 'audience-first-v1'
+  audience: string
+  audienceInferred: boolean
+  audienceReason: string
+  topic: string
+  assessment: { audienceFit: number; hook: number; payoff: number; clarity: number; shareability: number }
+  evidence: { basis: 'transcript'; openingQuote: string; closingQuote: string }
+    | { basis: 'sampled-frames'; timeSeconds: number; description: string }
+}
 export interface Settings {
   llmProvider: string
   transcriptionMode: TranscriptionMode
@@ -225,6 +236,7 @@ export interface Candidate {
   rationale: string
   rank: number
   selected: number
+  selection?: ClipSelection | null
 }
 
 export interface ManualCandidateInput {
@@ -354,8 +366,8 @@ export const api = {
     }),
   listFilterSuggestions: (projectId: string, signal?: AbortSignal) =>
     request<FilterSuggestion[]>(`/projects/${projectId}/filter-suggestions`, { signal }),
-  generateFilterSuggestion: (projectId: string, brief: string, signal?: AbortSignal) =>
-    request<FilterSuggestion>(`/projects/${projectId}/filter-suggestions/generate`, { method: 'POST', body: JSON.stringify({ brief }), signal }),
+  generateFilterSuggestion: (projectId: string, brief: string, signal?: AbortSignal, audienceBrief?: AudienceBrief) =>
+    request<FilterSuggestion>(`/projects/${projectId}/filter-suggestions/generate`, { method: 'POST', body: JSON.stringify({ brief, audienceBrief }), signal }),
   getProjectRenderSettings: (projectId: string, signal?: AbortSignal) =>
     request<ProjectRenderSettings>(`/projects/${projectId}/render-settings`, { signal }),
   saveRenderSettings: (projectId: string, captionSettings: CaptionSettings, videoFilters: VideoFilters, outputSettings?: OutputSettings) =>

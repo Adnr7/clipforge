@@ -23,11 +23,15 @@ CLAUDE_PROFILE = {**PROFILE, 'provider': 'claude',
                   'base_url': 'https://anthropic.example.test/v1/messages',
                   'model': 'connected-claude-vision-model'}
 RECOMMENDATION = {
+    'audience': 'People learning visual storytelling',
     'aspectRatio': {'mode': 'pad', 'ratio': '9:16'},
     'videoFilters': {'brightness': 0.05, 'contrast': 1.1, 'saturation': 1, 'blur': 0, 'sharpen': 0.2},
     'captionSettings': {'enabled': False, 'preset': 'minimal', 'placement': 'bottom'},
-    'candidates': [{'start': 0, 'end': 25, 'score': 75, 'hook': 'A promising visual introduction',
-                    'rationale': 'The opening samples show a subject; boundaries need review.'}],
+    'candidates': [{'start': 0, 'end': 25, 'hook': 'A promising visual introduction',
+                    'rationale': 'The opening samples show a subject; boundaries need review.',
+                    'topic': 'Visual introduction', 'audienceReason': 'The visible composition demonstrates a clear subject.',
+                    'assessment': {'audienceFit': 4, 'hook': 4, 'payoff': 4, 'clarity': 4, 'shareability': 3},
+                    'evidenceFrame': 0, 'evidenceDescription': 'A subject is visible in the opening composition.'}],
     'rationale': 'Padding preserves the visible composition in the sampled frames.',
 }
 TIMES = [index * 119.5 / 9 for index in range(10)]
@@ -99,7 +103,7 @@ def test_public_api_sends_sampled_images_metadata_and_same_connected_model_witho
     body = request.kwargs['json']
     assert body['model'] == PROFILE['model']
     assert request.kwargs['timeout'] == (5, 60)
-    assert body['max_tokens'] == 3000
+    assert body['max_tokens'] == 4500
     assert body['response_format']['json_schema']['strict'] is True
     assert body['response_format']['json_schema']['schema'] == visual.recommendation_schema()
     content = body['messages'][0]['content']
@@ -229,7 +233,7 @@ def test_native_claude_transport_preserves_timestamped_frames_and_frozen_profile
     assert request.kwargs['timeout'] == (5, 60)
     body = request.kwargs['json']
     assert body['model'] == CLAUDE_PROFILE['model']
-    assert body['max_tokens'] == 3000
+    assert body['max_tokens'] == 4500
     assert 'response_format' not in body
     assert len(body['messages']) == 1 and body['messages'][0]['role'] == 'user'
     content = body['messages'][0]['content']
@@ -237,7 +241,8 @@ def test_native_claude_transport_preserves_timestamped_frames_and_frozen_profile
     assert content[0]['type'] == 'text'
     context = json.loads(content[0]['text'].split('\nContext: ')[1])
     assert context == {'source': result['source'], 'sampledFrameTimes': result['sampledFrameTimes'],
-                       'brief': 'Preserve both subjects in frame', 'transcript': ''}
+                        'brief': 'Preserve both subjects in frame', 'transcript': '',
+                        'audienceBrief': {'audience': '', 'goal': '', 'notes': ''}}
     schema_text = content[0]['text'].split('no extra fields:\n')[1].split('\nContext: ')[0]
     assert json.loads(schema_text) == visual.recommendation_schema()
     for index, timestamp in enumerate(result['sampledFrameTimes']):
@@ -253,7 +258,7 @@ def test_native_claude_transport_preserves_timestamped_frames_and_frozen_profile
     assert native.call_args.kwargs == {
         'profile': {'provider': 'claude', 'base_url': endpoint,
                     'model': CLAUDE_PROFILE['model'], 'api_key': CLAUDE_PROFILE['api_key']},
-        'retries': 1, 'timeout': (5, 60), 'max_tokens': 3000,
+        'retries': 1, 'timeout': (5, 60), 'max_tokens': 4500,
     }
     native.assert_called_once()
     compatible.assert_not_called()
@@ -473,7 +478,7 @@ def test_candidate_bounds_and_types_are_strict(field, value):
 
 def test_candidates_must_not_overlap_and_must_have_sampled_evidence():
     result = copy.deepcopy(RECOMMENDATION)
-    result['candidates'].append({**result['candidates'][0], 'start': 20, 'end': 40})
+    result['candidates'].append({**result['candidates'][0], 'start': 20, 'end': 40, 'evidenceFrame': 2})
     with pytest.raises(ValueError, match='overlap'):
         visual.validate_recommendation(result, 120, TIMES)
     result['candidates'] = [{**result['candidates'][0], 'start': 20, 'end': 40}]
@@ -486,8 +491,10 @@ def test_empty_candidates_are_valid_and_accepted_candidates_are_score_ranked():
     result['candidates'] = []
     assert visual.validate_recommendation(result, 120, TIMES)['candidates'] == []
     result['candidates'] = [RECOMMENDATION['candidates'][0],
-                            {**RECOMMENDATION['candidates'][0], 'start': 30, 'end': 55, 'score': 90}]
-    assert [c['score'] for c in visual.validate_recommendation(result, 120, TIMES)['candidates']] == [90, 75]
+                            {**RECOMMENDATION['candidates'][0], 'start': 30, 'end': 55, 'evidenceFrame': 3,
+                             'topic': 'A distinct second idea',
+                             'assessment': {'audienceFit': 5, 'hook': 4, 'payoff': 5, 'clarity': 4, 'shareability': 3}}]
+    assert [c['score'] for c in visual.validate_recommendation(result, 120, TIMES)['candidates']] == [89, 78]
 
 
 @pytest.mark.parametrize('duration', [0.1, 10, 15])

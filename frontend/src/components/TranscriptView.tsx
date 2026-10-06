@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileText, ScanText, ScanEye } from 'lucide-react'
-import type { TranscriptData } from '../api/client'
+import type { AudienceBrief, TranscriptData } from '../api/client'
+import { audienceFieldLimits } from '../api/audience'
 import { formatTime } from '../api/format'
 import WorkflowStep from './ui/WorkflowStep'
 
-export default function TranscriptView({ transcript, hasSpeech, currentTime, onAnalyze, analysisMode, onAnalysisModeChange, hasCandidates, analyzing, disabled, onSeek, invalid }: {
+export default function TranscriptView({ transcript, hasSpeech, currentTime, onAnalyze, analysisMode, onAnalysisModeChange, audienceBrief, onAudienceChange, hasCandidates, analyzing, disabled, onSeek, invalid }: {
   transcript: TranscriptData | null; hasSpeech: boolean; currentTime: number; onAnalyze: () => void; analyzing: boolean
   hasCandidates: boolean; disabled: boolean; onSeek: (seconds: number) => void; invalid: boolean
   analysisMode: 'transcript' | 'visual'; onAnalysisModeChange: (mode: 'transcript' | 'visual') => void
+  audienceBrief: AudienceBrief; onAudienceChange: (brief: AudienceBrief) => void
 }) {
   const activeRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -25,12 +27,18 @@ export default function TranscriptView({ transcript, hasSpeech, currentTime, onA
   return <>
     <div className="panel-heading"><div className="inline"><FileText size={16} /><h2>Transcript</h2>{transcript?.language && <span className="badge badge-neutral">{transcript.language.toUpperCase()}</span>}</div></div>
     <div className="analysis-toolbar">
+      <details className="audience-brief"><summary>Audience & takeaway{audienceBrief.audience.trim() ? ` · ${audienceBrief.audience.slice(0, 60)}` : ''}</summary><fieldset disabled={disabled} className="stack compact">
+        <label className="field">Target audience<input className="input-field" maxLength={audienceFieldLimits.audience} value={audienceBrief.audience} onChange={(event) => onAudienceChange({ ...audienceBrief, audience: event.target.value })} placeholder="For example, students learning public speaking" /></label>
+        <label className="field">Viewer takeaway<input className="input-field" maxLength={audienceFieldLimits.goal} value={audienceBrief.goal} onChange={(event) => onAudienceChange({ ...audienceBrief, goal: event.target.value })} placeholder="A practical way to make a confident opening" /></label>
+        <label className="field">Audience notes & exclusions<textarea className="input-field" rows={2} maxLength={audienceFieldLimits.notes} value={audienceBrief.notes} onChange={(event) => onAudienceChange({ ...audienceBrief, notes: event.target.value })} placeholder="Knowledge level, topics to emphasize, and parts to avoid" /></label>
+        <p className="field-hint">Shared with AI Edit and editing suggestions. If the audience is blank, the model labels its source-based audience assumption.</p>
+      </fieldset></details>
       <div className="analysis-modes" role="group" aria-label="Clip analysis source">
         <label><input type="radio" name="analysis-mode" checked={analysisMode === 'transcript'} disabled={disabled || !hasSpeech} onChange={() => onAnalysisModeChange('transcript')} />Speech</label>
         <label><input type="radio" name="analysis-mode" checked={analysisMode === 'visual'} disabled={disabled} onChange={() => onAnalysisModeChange('visual')} />Video visuals</label>
       </div>
       <button className="btn-accent" title={`Step 3: Analyze ${analysisMode === 'visual' ? 'video visuals' : 'transcript'}`} onClick={onAnalyze} disabled={disabled}><WorkflowStep step={3} />{analyzing ? <span className="spinner" /> : analysisMode === 'visual' ? <ScanEye size={15} /> : <ScanText size={15} />}{analyzing ? 'Finding highlights…' : hasCandidates ? 'Analyze again' : 'Find clip candidates'}</button>
-      <p className="analysis-hint">{analysisMode === 'visual' ? 'Inspects sampled video frames with your image-capable analysis model. No transcription required.' : 'Ranks moments from the speech transcript using your analysis model.'}</p>
+      <p className="analysis-hint">{analysisMode === 'visual' ? 'Ranks visible moments for your audience using sampled-frame evidence. No transcription required.' : 'Finds audience-relevant ideas from timed speech, then reviews their opening and payoff.'}</p>
       {!followPlayback && hasSpeech && <button className="text-button" onClick={() => setFollowPlayback(true)}>Follow playback</button>}
     </div>
     <div className="panel-body" ref={scrollerRef} onScroll={() => setFollowPlayback(false)}>

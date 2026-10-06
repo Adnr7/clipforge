@@ -54,7 +54,7 @@ def test_manual_candidate_needs_no_usable_transcript(app, client, jobs, transcri
         'score': 0, 'hook': 'Manual cut',
         'rationale': 'Manually selected time range; no AI analysis.', 'rank': 1, 'selected': 1,
     }
-    assert rows(app, 'SELECT * FROM candidates') == [candidate]
+    assert rows(app, 'SELECT * FROM candidates') == [{**candidate, 'selection_json': None}]
     assert rows(app, 'SELECT status, last_job_stage FROM projects') == [
         {'status': 'imported', 'last_job_stage': None},
     ]
@@ -82,14 +82,16 @@ def test_manual_cut_appends_and_preserves_selections_outputs_and_job_errors(app,
     assert response.status_code == 201
     assert response.json['hook'] == "It's 100%: a manual choice!"
     assert response.json['rank'] == 8
-    assert rows(app, 'SELECT * FROM candidates ORDER BY rowid') == [*candidates_before, response.json]
+    assert rows(app, 'SELECT * FROM candidates ORDER BY rowid') == [
+        *candidates_before, {**response.json, 'selection_json': None},
+    ]
     assert rows(app, 'SELECT * FROM clips') == clips_before
     assert output.read_bytes() == b'completed output'
     project_after = rows(app, 'SELECT * FROM projects WHERE id=?', ('project',))[0]
     assert project_after.pop('updated_at') != project_before.pop('updated_at')
     assert project_after == project_before
     reopened = create_app().test_client().get('/api/projects/project').json
-    assert reopened['candidates'][-1] == response.json
+    assert reopened['candidates'][-1] == {**response.json, 'selection': None}
     assert reopened['clips'] == clips_before
     assert jobs.tasks == []
 

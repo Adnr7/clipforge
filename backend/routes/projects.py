@@ -15,6 +15,7 @@ from backend.services.render_settings import (
     resolve_project_settings, validate_caption_settings, validate_video_filters, validate_output_settings,
 )
 from backend.routes.transcription import _RouteError, _check_project_available
+from backend.services.clip_selection_service import validate_selection
 
 projects_bp = Blueprint('projects', __name__)
 _MEDIA_EXTENSIONS = {'.mp4', '.mov', '.mkv', '.avi', '.webm', '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.m4v'}
@@ -139,10 +140,19 @@ def get_project_detail(project_id):
     ''', (project_id,)).fetchall()
     db.commit()
 
+    public_candidates = []
+    for candidate in candidates:
+        item = dict(candidate)
+        try:
+            selection = json.loads(item.pop('selection_json', None) or 'null')
+            item['selection'] = validate_selection(selection) if selection else None
+        except (ValueError, TypeError):
+            item['selection'] = None
+        public_candidates.append(item)
     return jsonify({
         'project': project,
         'transcript': dict(transcript) if transcript else None,
-        'candidates': [dict(c) for c in candidates],
+        'candidates': public_candidates,
         'clips': [dict(c) for c in clips],
         'jobs': project_job_statuses(project, transcript is not None, bool(candidates)),
     })

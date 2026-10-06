@@ -16,6 +16,7 @@ from backend.services.llm_service import PROVIDERS, analyze_transcript, parse_ca
 from backend.services.llm_service import provider_model
 from backend.services.visual_analysis_service import analyze_video
 from backend.services.editing_brief import validate_editing_brief
+from backend.services.clip_selection_service import validate_audience_brief
 
 analysis_bp = Blueprint('analysis', __name__)
 
@@ -68,23 +69,29 @@ def transcript_context(db, project_id, required=False):
 
 
 def _run_analysis(app, project_id, transcript_text, duration, provider, profile=None,
-                  mode='transcript', source_path=None, brief=''):
+                  mode='transcript', source_path=None, brief='', transcript_data=None,
+                  audience_brief=None):
     """Validate the complete replacement before changing any existing candidates."""
     with app.app_context():
         try:
             visual = None
             if mode == 'visual':
                 visual = analyze_video(source_path, provider, profile=profile,
-                                       brief=brief, transcript_text=transcript_text)
+                                       brief=brief, transcript_text=transcript_text,
+                                       audience_brief=audience_brief)
                 visual = {**visual, 'model': provider_model(provider, profile), 'provider': provider}
                 candidates = visual['candidates']
             else:
                 options = {'profile': profile}
+                if transcript_data is not None:
+                    options['transcript_data'] = transcript_data
+                if audience_brief is not None:
+                    options['audience_brief'] = audience_brief
                 if brief:
                     options['brief'] = brief
                 candidates = analyze_transcript(transcript_text, duration, provider, **options)
             if not isinstance(candidates, list) or not candidates:
-                raise ValueError('Analysis returned no usable candidates')
+                raise ValueError('Analysis returned no usable candidates for this audience. Adjust the takeaway or create a manual cut.')
             # Reuse the service's schema validation at the persistence boundary.
             candidates = parse_candidates(json.dumps(candidates, allow_nan=False))
             if duration > 0 and any(candidate['end'] > duration for candidate in candidates):
@@ -97,9 +104,10 @@ def _run_analysis(app, project_id, transcript_text, duration, provider, profile=
             db.execute('DELETE FROM candidates WHERE project_id=?', (project_id,))
             for rank, candidate in enumerate(candidates, start=1):
                 db.execute(
-                    'INSERT INTO candidates (id, project_id, start_sec, end_sec, score, hook, rationale, rank, selected) VALUES (?,?,?,?,?,?,?,?,?)',
+                    'INSERT INTO candidates (id, project_id, start_sec, end_sec, score, hook, rationale, rank, selected, selection_json) VALUES (?,?,?,?,?,?,?,?,?,?)',
                     (str(uuid.uuid4()), project_id, candidate['start'], candidate['end'],
-                     candidate['score'], candidate['hook'], candidate['rationale'], rank, 0),
+                      candidate['score'], candidate['hook'], candidate['rationale'], rank, 0,
+                      json.dumps(candidate['selection'], allow_nan=False) if candidate.get('selection') else None),
                 )
             db.execute('''UPDATE projects SET status=?, last_job_stage='analysis',
                           analysis_error=NULL, visual_analysis_json=?, updated_at=? WHERE id=?''',
@@ -117,13 +125,14 @@ def analyze_project(project_id):
         project = _get_project(db, project_id)
         _check_project_available(db, project)
         data = _json_object()
-        if set(data) - {'mode', 'brief', 'provider', 'profileId'}:
-            raise _RouteError('Only mode, brief, provider and profileId are accepted')
+        if set(data) - {'mode', 'brief', 'provider', 'profileId', 'audienceBrief'}:
+            raise _RouteError('Only mode, brief, provider, profileId and audienceBrief are accepted')
         mode = data.get('mode', 'transcript')
         if not isinstance(mode, str) or mode not in ('transcript', 'visual'):
             raise _RouteError('mode must be transcript or visual')
         try:
             brief = validate_editing_brief(data.get('brief', ''))
+            audience_brief = validate_audience_brief(data.get('audienceBrief'))
         except ValueError as exc:
             raise _RouteError(str(exc)) from exc
         transcript_text, transcript_data = transcript_context(db, project_id, required=mode == 'transcript')
@@ -153,7 +162,7 @@ def analyze_project(project_id):
         threading.Thread(
             target=_run_analysis,
             args=(current_app._get_current_object(), project_id, transcript_text, duration, provider,
-                  profile, mode, project['source_path'], brief),
+                  profile, mode, project['source_path'], brief, transcript_data, audience_brief),
             daemon=True,
         ).start()
     except Exception as exc:

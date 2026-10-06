@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { CheckCircle2, Circle, Download, Film, Lightbulb, MessageSquare, Play, Send, Sparkles, Square, XCircle } from 'lucide-react'
-import { api, type CaptionSettings, type MediaProbe, type OutputSettings, type ProjectDetail, type VideoFilters } from '../api/client'
+import { api, type AudienceBrief, type CaptionSettings, type MediaProbe, type OutputSettings, type ProjectDetail, type VideoFilters } from '../api/client'
+import { audienceFromBrief } from '../api/audience'
 import { aiBriefFieldLimits, aiEditApi, aiEditError, applyAiRecommendedSettings, createAiEditPlan, defaultAiBrief, describeAiOutput, formatAiEditBrief, projectPlanBasis, projectVisualRecommendation, runAiEditPlan, type AiEditActivity, type AiEditBrief, type AiEditMessage, type AiEditPlan, type AiEditStep, type VisualRecommendation } from '../api/aiEdit'
 import { formatTime } from '../api/format'
 import Modal from './ui/Modal'
@@ -26,8 +27,9 @@ function loadDraft(projectId: string): { brief: AiEditBrief; messages: AiEditMes
       if (Object.hasOwn(platforms, saved.brief.platform)) brief.platform = saved.brief.platform
       if (Object.hasOwn(lengths, saved.brief.length)) brief.length = saved.brief.length
       if ([1, 3, 5].includes(saved.brief.clipCount)) brief.clipCount = saved.brief.clipCount
-      for (const key of ['captions', 'reuseCandidates'] as const) if (typeof saved.brief[key] === 'boolean') brief[key] = saved.brief[key]
-      if (['visual', 'transcript'].includes(saved.brief.analysisMode)) brief.analysisMode = saved.brief.analysisMode
+      if (typeof saved.brief.captions === 'boolean') brief.captions = saved.brief.captions
+      if (saved.selectionMethod === 'audience-first-v1' && typeof saved.brief.reuseCandidates === 'boolean') brief.reuseCandidates = saved.brief.reuseCandidates
+      if (['auto', 'visual', 'transcript'].includes(saved.brief.analysisMode)) brief.analysisMode = saved.brief.analysisMode
       const messages = saved.messages.filter((message: AiEditMessage) => message && ['user', 'guide', 'model'].includes(message.role) && typeof message.text === 'string')
         .slice(-20).map((message: AiEditMessage) => ({ role: message.role, text: message.text.slice(0, 8000),
           ...(typeof message.model === 'string' ? { model: message.model.slice(0, 200) } : {}),
@@ -45,16 +47,18 @@ function sourceRatio(width: number, height: number): string {
   return `${ratio.toFixed(2)}:1`
 }
 
-export default function AiEditMode({ detail, active, busy, captionSettings, videoFilters, outputSettings, onBusyChange, onRefresh, onRenderQueued, onSelectionSaved, onManual, onOpenControls }: {
+export default function AiEditMode({ detail, active, busy, audienceBrief, onAudienceChange, captionSettings, videoFilters, outputSettings, onBusyChange, onRefresh, onRenderQueued, onSelectionSaved, onManual, onOpenControls }: {
   detail: ProjectDetail; active: boolean; busy: boolean; captionSettings: CaptionSettings; videoFilters: VideoFilters
   outputSettings: OutputSettings
+  audienceBrief: AudienceBrief; onAudienceChange: (brief: AudienceBrief) => void
   onBusyChange: (busy: boolean) => void; onRefresh: () => Promise<boolean>
   onRenderQueued: (candidateId: string, clipId: string) => void; onSelectionSaved: () => void
   onManual: () => void; onOpenControls: () => void
 }) {
   const projectId = detail.project.id
   const [draft, setDraft] = useState(() => loadDraft(projectId))
-  const { brief, messages } = draft
+  const { messages } = draft
+  const brief = { ...draft.brief, ...audienceBrief }
   const [reply, setReply] = useState('')
   const [chatBusy, setChatBusy] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
@@ -108,7 +112,7 @@ export default function AiEditMode({ detail, active, busy, captionSettings, vide
     return () => { mounted.current = false; runner.current?.abort(); recommendationController.current?.abort(); probeController.current?.abort(); chatController.current?.abort() }
   }, [])
   useEffect(() => {
-    try { sessionStorage.setItem(`clipforge.ai-edit.v2.${projectId}`, JSON.stringify(draft)) } catch { /* Draft stays in memory. */ }
+    try { sessionStorage.setItem(`clipforge.ai-edit.v2.${projectId}`, JSON.stringify({ ...draft, selectionMethod: 'audience-first-v1' })) } catch { /* Draft stays in memory. */ }
   }, [draft, projectId])
   useEffect(() => {
     if (!active) videoRef.current?.pause()
@@ -120,6 +124,7 @@ export default function AiEditMode({ detail, active, busy, captionSettings, vide
   }, [messages, active])
 
   const updateBrief = (patch: Partial<AiEditBrief>) => {
+    if (['audience', 'goal', 'notes'].some((key) => Object.hasOwn(patch, key))) onAudienceChange(audienceFromBrief({ ...brief, ...patch }))
     setDraft((previous) => ({ ...previous, brief: { ...previous.brief, ...patch } }))
     setPlan(null); setConfirmed(false)
   }
@@ -141,6 +146,7 @@ export default function AiEditMode({ detail, active, busy, captionSettings, vide
       patch = { notes }
     }
     const updatedBrief = { ...brief, ...patch }
+    onAudienceChange(audienceFromBrief(updatedBrief))
     const controller = new AbortController(); chatController.current = controller; chatLock.current = true
     setDraft((previous) => ({ brief: updatedBrief, messages: [...previous.messages, { role: 'user', text } as AiEditMessage].slice(-20) }))
     setReply(''); setPlan(null); setConfirmed(false); setChatError(null); setChatBusy(true)
@@ -242,13 +248,14 @@ export default function AiEditMode({ detail, active, busy, captionSettings, vide
           </section>
           <section className="ai-edit-card" aria-labelledby="ai-recommendation-title">
             <div className="section-heading"><h3 id="ai-recommendation-title"><Lightbulb size={18} />AI recommendation</h3><span className="badge badge-info">{recommendation ? 'Sampled-frame model response' : 'Visual model'}</span></div>
-            <p>{recommendation?.rationale || 'Ask your visual model to inspect sampled source frames and suggest moments, framing, captions, and a look. Works with music and videos without speech.'}</p>
+            <p>{recommendation?.rationale || 'Inspect sampled frames for moments and a look that fit your intended viewer. Visible evidence, audience fit and a complete payoff take priority over filling a clip quota.'}</p>
             {recommendation && <>
+              {recommendation.audience && <p className="muted"><strong>Intended audience:</strong> {recommendation.audience}</p>}
               <p className="muted">Model: {recommendation.model} · {recommendation.sampledFrameTimes.length} sampled frames</p>
               <p className="muted">{recommendation.contextNotice || 'Based on sampled video frames.'}</p>
               <p className="muted">Framing: {recommendation.aspectRatio.mode} · {recommendation.aspectRatio.ratio}. Captions: {recommendation.captionSettings.enabled === false ? 'off' : recommendation.captionSettings.preset || 'current preset'}{recommendation.captionSettings.placement ? ` · ${recommendation.captionSettings.placement}` : ''}</p>
               <p className="muted">{Object.entries(recommendation.videoFilters).map(([key, value]) => `${key}: ${value}`).join(' · ')}</p>
-              <details className="ai-visual-details"><summary>Sample times & suggested moments ({recommendation.candidates.length})</summary><p className="muted">Frames: {recommendation.sampledFrameTimes.map(formatTime).join(' · ')}</p><ul>{recommendation.candidates.map((candidate, index) => <li key={index}><strong>{candidate.hook}</strong><span className="mono">{formatTime(candidate.start)} – {formatTime(candidate.end)} · score {candidate.score}</span><p>{candidate.rationale}</p></li>)}</ul></details>
+              <details className="ai-visual-details"><summary>Sample times & suggested moments ({recommendation.candidates.length})</summary><p className="muted">Frames: {recommendation.sampledFrameTimes.map(formatTime).join(' · ')}</p><ul>{recommendation.candidates.map((candidate, index) => <li key={index}><strong>{candidate.hook}</strong><span className="mono">{formatTime(candidate.start)} – {formatTime(candidate.end)} · editorial score {candidate.score}</span><p>{candidate.rationale}</p>{candidate.selection && <p><strong>Audience fit {candidate.selection.assessment.audienceFit}/5:</strong> {candidate.selection.audienceReason}</p>}</li>)}</ul></details>
               {recommendationStale && <p className="field-hint">The brief changed. Request a fresh recommendation to review these settings.</p>}
             </>}
             <button className="btn-secondary" disabled={blocked} onClick={() => void askRecommendation()}>{recommendationBusy ? <span className="spinner" /> : <Sparkles size={16} />}{recommendationBusy ? 'Inspecting sampled frames…' : 'Get visual recommendation'}</button>
@@ -262,11 +269,11 @@ export default function AiEditMode({ detail, active, busy, captionSettings, vide
           <fieldset disabled={blocked} className="ai-brief-fields">
             <div className="form-grid"><label className="field">Who is the audience?<input className="input-field" value={brief.audience} maxLength={aiBriefFieldLimits.audience} onChange={(event) => updateBrief({ audience: event.target.value })} placeholder="For example, first-time founders" /></label><label className="field">What should viewers take away?<input className="input-field" value={brief.goal} maxLength={aiBriefFieldLimits.goal} onChange={(event) => updateBrief({ goal: event.target.value })} placeholder="One useful idea they can act on" /></label></div>
             <div className="ai-brief-options"><label className="field">Destination<select className="input-field" value={brief.platform} onChange={(event) => updateBrief({ platform: event.target.value as AiEditBrief['platform'] })}>{Object.entries(platforms).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="field">Number of clips<select className="input-field" value={brief.clipCount} onChange={(event) => updateBrief({ clipCount: Number(event.target.value) })}><option value={1}>Up to 1</option><option value={3}>Up to 3</option><option value={5}>Up to 5</option></select></label><label className="field">Preferred clip length<select className="input-field" value={brief.length} onChange={(event) => updateBrief({ length: event.target.value as AiEditBrief['length'] })}>{Object.entries(lengths).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-            <label className="field ai-analysis-field">Clip analysis<select className="input-field" value={brief.analysisMode} onChange={(event) => updateBrief({ analysisMode: event.target.value as AiEditBrief['analysisMode'] })}><option value="visual">Visual · sampled video frames</option><option value="transcript">Transcript · spoken moments</option></select></label>
+            <label className="field ai-analysis-field">Clip analysis<select className="input-field" value={brief.analysisMode} onChange={(event) => updateBrief({ analysisMode: event.target.value as AiEditBrief['analysisMode'] })}><option value="auto">Auto · speech when available, otherwise visuals</option><option value="transcript">Transcript · timed spoken moments</option><option value="visual">Visual · sampled video frames</option></select></label>
             <label className="field">Topics, tone & things to avoid<textarea className="input-field" rows={3} value={brief.notes} maxLength={aiBriefFieldLimits.notes} onChange={(event) => updateBrief({ notes: event.target.value })} placeholder="Keep the useful explanations; avoid an exaggerated look." /></label>
             <div className="inline wrap"><label className="checkbox-field"><input type="checkbox" checked={brief.captions} onChange={(event) => updateBrief({ captions: event.target.checked })} />Burn in captions</label>{detail.candidates.length > 0 && <label className="checkbox-field"><input type="checkbox" checked={brief.reuseCandidates} onChange={(event) => updateBrief({ reuseCandidates: event.target.checked })} />Reuse existing candidates</label>}</div>
           </fieldset>
-          <p className="field-hint">Your complete brief goes to the model. Captions off skips transcription; no speech continues with visual analysis and captions off. Length is a preference when selecting candidates.</p>
+          <p className="field-hint">Audience fit 35% · hook 20% · payoff 20% · clarity 15% · shareability 10%. Auto uses timed speech when available, otherwise frames. Fresh analysis is the default; reusing candidates keeps their existing ranking.</p>
           <div className="ai-plan-actions"><button className="btn-secondary" disabled={blocked} onClick={onOpenControls}>Caption Controls & filters</button><button className="btn-accent" disabled={blocked || !brief.audience.trim() || !brief.goal.trim()} onClick={reviewPlan}><Sparkles size={16} />Review plan</button></div>
           {(!brief.audience.trim() || !brief.goal.trim()) && <p className="field-hint">Answer the audience and takeaway questions to review your plan.</p>}
         </section>
@@ -298,7 +305,7 @@ export default function AiEditMode({ detail, active, busy, captionSettings, vide
 
     {plan && <Modal title="Review automated edit plan" width={720} onClose={() => setPlan(null)} closeOnBackdrop={false}>
       <div className="stack compact ai-plan-review"><p><strong>{platforms[plan.brief.platform]}</strong> · Up to {plan.brief.clipCount} clips · {lengths[plan.brief.length]}</p><p className="muted">Audience: {plan.brief.audience}<br />Takeaway: {plan.brief.goal}</p>
-        <ol><li><strong>Transcribe:</strong> {plan.transcribe ? 'Create speech context for analysis or captions. Video can continue with visual analysis if speech is unavailable.' : 'Skip transcription; reuse speech if available.'}</li><li><strong>Analyze:</strong> {plan.analyze ? plan.brief.analysisMode === 'visual' ? 'Inspect sampled video frames with your full brief.' : 'Rank spoken moments with your full brief; use visual analysis if speech is unavailable and the source has video.' : 'Reuse existing candidates without replacing them.'}</li><li><strong>Select:</strong> Save up to {plan.brief.clipCount} candidates, preferring {lengths[plan.brief.length].toLowerCase()}, then higher scores.</li><li><strong>Render:</strong> {describeAiOutput(plan.renderOptions.outputSettings)} · captions {plan.renderOptions.captionSettings?.enabled ? `on (${plan.renderOptions.captionStyle}, when speech is available)` : 'off'} · {plan.useRecommendedSettings ? 'AI recommended settings' : 'reviewed project settings'}.</li></ol>
+        <ol><li><strong>Transcribe:</strong> {plan.transcribe ? 'Create speech context for analysis or captions. Video can continue with visual analysis if speech is unavailable.' : 'Skip transcription; reuse speech if available.'}</li><li><strong>Analyze:</strong> {plan.analyze ? plan.brief.analysisMode === 'visual' ? 'Inspect sampled frames using audience fit and visible evidence.' : 'Scout timed spoken ideas and independently review audience fit, opening and payoff; use visual evidence when speech is unavailable.' : 'Reuse existing candidates without reranking for this audience.'}</li><li><strong>Select:</strong> Save up to {plan.brief.clipCount} candidates, preferring {lengths[plan.brief.length].toLowerCase()}, then higher scores.</li><li><strong>Render:</strong> {describeAiOutput(plan.renderOptions.outputSettings)} · captions {plan.renderOptions.captionSettings?.enabled ? `on (${plan.renderOptions.captionStyle}, when speech is available)` : 'off'} · {plan.useRecommendedSettings ? 'AI recommended settings' : 'reviewed project settings'}.</li></ol>
         {(plan.recommendation || plan.analyze) && <div className="ai-plan-settings"><label className="checkbox-field"><input type="checkbox" checked={plan.useRecommendedSettings} onChange={(event) => toggleRecommendedSettings(event.target.checked)} />Use AI recommended settings</label><p className="field-hint">{plan.recommendation ? `${plan.recommendation.model}: ${plan.recommendation.rationale}` : 'Use visual model framing, filters, and caption choices when available.'}{plan.analyze ? ' The completed visual analysis can update these render settings.' : ''}</p></div>}
         {plan.candidateIds.length > 0 && <div className="ai-plan-candidates">{plan.candidateIds.map((id) => { const candidate = detail.candidates.find((item) => item.id === id); return candidate && <p key={id}><strong>{candidate.hook}</strong><span className="mono">{formatTime(candidate.start_sec)} – {formatTime(candidate.end_sec)}</span></p> })}</div>}
         {plan.replacesCandidates && <><p className="notice notice-warning">Successful reanalysis replaces current candidates and selections and removes their existing rendered clips from this project. Download clips you want to keep first.</p><label className="checkbox-field"><input type="checkbox" checked={replaceConfirmed} onChange={(event) => setReplaceConfirmed(event.target.checked)} />I confirm replacing existing candidates and outputs</label></>}

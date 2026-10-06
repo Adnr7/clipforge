@@ -119,6 +119,7 @@ def init_db(app):
             ('projects', 'transcription_error', 'TEXT'),
             ('projects', 'analysis_error', 'TEXT'),
             ('projects', 'visual_analysis_json', 'TEXT'),
+            ('candidates', 'selection_json', 'TEXT'),
             ('clips', 'render_settings_json', 'TEXT'),
             ('filter_suggestions', 'caption_settings_json', 'TEXT'),
             ('filter_suggestions', 'output_settings_json', 'TEXT'),
