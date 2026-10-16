@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { AlertTriangle, ArrowRight, Clapperboard, Film, Plus, Search, Settings } from 'lucide-react'
-import { api, errorMessage, type Project } from '../api/client'
+import { api, errorMessage, type EnvironmentStatus, type Project } from '../api/client'
 import { useProjects } from '../hooks/useProjects'
 import { useToast } from '../hooks/useToast'
 import Modal from './ui/Modal'
@@ -9,8 +9,8 @@ import ProjectCard from './ProjectCard'
 import NewProjectModal from './NewProjectModal'
 import WorkflowStep from './ui/WorkflowStep'
 
-export default function Dashboard({ onOpenProject, onOpenSettings, needsOnboarding, onStartOnboarding }: {
-  onOpenProject: (id: string) => void; onOpenSettings: () => void; needsOnboarding: boolean; onStartOnboarding: () => void
+export default function Dashboard({ onOpenProject, onOpenSettings, mediaReady, mediaRuntime, onStartOnboarding }: {
+  onOpenProject: (id: string) => void; onOpenSettings: () => void; mediaReady: boolean; mediaRuntime?: EnvironmentStatus['mediaRuntime']; onStartOnboarding: () => void
 }) {
   const { projects, loading, error, refresh } = useProjects()
   const { showToast } = useToast()
@@ -35,12 +35,12 @@ export default function Dashboard({ onOpenProject, onOpenSettings, needsOnboardi
   return <div className="app-shell">
     <header className="app-header"><div className="brand"><span className="brand-mark"><Clapperboard size={21} /></span><div><strong>ClipForge</strong><span className="brand-subtitle">THE CLIP STUDIO</span></div></div><nav className="header-actions" aria-label="Workspace settings"><ThemeSelect /><button className="btn-secondary" onClick={onOpenSettings}><Settings size={16} />Settings</button></nav></header>
     <main className="dashboard-main">
-      {needsOnboarding && <div className="notice notice-warning"><AlertTriangle size={18} /><span>FFmpeg or FFprobe is missing. Complete setup to import and render media.</span><button className="text-button" onClick={onStartOnboarding}>Run setup <ArrowRight size={14} /></button></div>}
-      <section className="dashboard-heading"><div><p className="eyebrow">YOUR WORKSPACE</p><h1>Projects</h1><p className="muted">Long-form stories. Standout moments.</p></div><button className="btn-accent" title="Step 1: Import media" onClick={() => setNewProjectOpen(true)}><WorkflowStep step={1} /><Plus size={17} />New project</button></section>
+      {!mediaReady && <div className="notice notice-warning"><AlertTriangle size={18} /><span>{mediaRuntime?.message || 'FFmpeg and FFprobe are not ready. Media tools will be prepared automatically on supported Linux/WSL systems.'}</span><button className="text-button" onClick={onStartOnboarding}>View setup guide <ArrowRight size={14} /></button></div>}
+      <section className="dashboard-heading"><div><p className="eyebrow">YOUR WORKSPACE</p><h1>Projects</h1><p className="muted">Long-form stories. Standout moments.</p></div><button className="btn-accent" title={mediaReady ? 'Step 1: Import media' : 'Media tools are not ready'} disabled={!mediaReady} onClick={() => setNewProjectOpen(true)}><WorkflowStep step={1} /><Plus size={17} />New project</button></section>
       <div className="library-toolbar"><div className="inline"><h2>Project library</h2><span className="count-label">{projects.length}</span></div><div className="search-field"><Search size={16} aria-hidden="true" /><label className="sr-only" htmlFor="project-search">Search projects</label><input id="project-search" type="search" placeholder="Search projects" value={search} onChange={(event) => setSearch(event.target.value)} /></div></div>
       {loading && <div className="empty-state" role="status"><span className="spinner" /><p>Loading your projects…</p></div>}
       {error && <div className="notice notice-error" role="alert"><AlertTriangle size={18} /><span>{error}</span><button className="btn-secondary" onClick={refresh}>Retry</button></div>}
-      {!loading && !error && projects.length === 0 && <section className="library-empty"><div className="empty-illustration"><Film size={48} strokeWidth={1} /></div><p className="eyebrow">A NEW CUT STARTS HERE</p><h2>Bring your first story in.</h2><p>Import a video, podcast, or interview. Review the transcript, discover the strongest moments, and export your clips.</p><button className="btn-accent" title="Step 1: Import media" onClick={() => setNewProjectOpen(true)}><WorkflowStep step={1} /><Plus size={16} />Create your first project</button><div className="empty-formats">VIDEO & AUDIO <span>MP4 · MOV · MKV · MP3 · WAV</span></div></section>}
+       {!loading && !error && projects.length === 0 && <section className="library-empty"><div className="empty-illustration"><Film size={48} strokeWidth={1} /></div><p className="eyebrow">A NEW CUT STARTS HERE</p><h2>Bring your first story in.</h2><p>Import a video, podcast, or interview. Review the transcript, discover the strongest moments, and export your clips.</p><button className="btn-accent" title={mediaReady ? 'Step 1: Import media' : 'Media tools are not ready'} disabled={!mediaReady} onClick={() => setNewProjectOpen(true)}><WorkflowStep step={1} /><Plus size={16} />Create your first project</button><div className="empty-formats">VIDEO & AUDIO <span>MP4 · MOV · MKV · MP3 · WAV</span></div></section>}
       {!loading && projects.length > 0 && filtered.length === 0 && <div className="empty-state"><Search size={28} /><h2>No matching projects</h2><p>Try another name or clear your search.</p><button className="btn-secondary" onClick={() => setSearch('')}>Clear search</button></div>}
       <div className="project-grid">{filtered.map((project) => <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project.id)} onRename={() => { setEditing({ project, action: 'rename' }); setName(project.name) }} onDelete={() => setEditing({ project, action: 'delete' })} />)}</div>
       <footer className="dashboard-footer"><span>ClipForge / From source to short.</span><button className="text-button" onClick={onStartOnboarding}>Setup guide <ArrowRight size={14} /></button></footer>

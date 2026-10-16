@@ -35,7 +35,8 @@ export default function App() {
         <Dashboard
           onOpenProject={(projectId) => setView({ page: 'workspace', projectId })}
           onOpenSettings={() => setSettingsOpen(true)}
-          needsOnboarding={!!status && (!status.hasFfmpeg || !status.hasFfprobe)}
+          mediaReady={!!status && status.hasFfmpeg && status.hasFfprobe}
+          mediaRuntime={status?.mediaRuntime}
           onStartOnboarding={() => setView({ page: 'onboarding' })}
         />
       )}

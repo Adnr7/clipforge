@@ -1,12 +1,24 @@
 import os
+import platform
 import shutil
 import subprocess
+import logging
+import importlib.util
+import sys
 from pathlib import Path
 from flask import current_app, has_app_context
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _FFMPEG_TOOL_NAMES = ('ffmpeg', 'ffprobe')
+_ACTIVE_FFMPEG_DIR = None
+_MEDIA_RUNTIME = {
+    'state': 'not_checked',
+    'platform': f'{platform.system().lower()}-{platform.machine().lower()}',
+    'source': None,
+    'message': 'Media runtime setup has not run yet.',
+}
+_LOGGER = logging.getLogger(__name__)
 
 
 def _candidate_ffmpeg_bin_dirs():
@@ -151,7 +163,9 @@ def configure_ffmpeg_runtime(candidate_dirs=None):
     Returns True when both commands can execute, otherwise False.  Failure is
     non-fatal so the status endpoint can explain an incomplete setup.
     """
+    global _ACTIVE_FFMPEG_DIR
     if os.name == 'nt':
+        _ACTIVE_FFMPEG_DIR = None
         return all(shutil.which(name) for name in _FFMPEG_TOOL_NAMES)
 
     directories = list(candidate_dirs) if candidate_dirs is not None else _candidate_ffmpeg_bin_dirs()
@@ -171,8 +185,131 @@ def configure_ffmpeg_runtime(candidate_dirs=None):
         os.environ['PATH'] = os.pathsep.join(path_entries)
         if 'LD_LIBRARY_PATH' in env:
             os.environ['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH']
+        _ACTIVE_FFMPEG_DIR = directory
         return True
+    _ACTIVE_FFMPEG_DIR = None
     return False
+
+
+def _runtime_source(directory):
+    if directory is None:
+        return None
+    directory = Path(directory).expanduser().absolute()
+    configured = os.environ.get('CLIPFORGE_FFMPEG_DIR')
+    if configured and directory == Path(configured).expanduser().absolute():
+        return 'configured'
+    managed_root = Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg'
+    if directory == managed_root or managed_root in directory.parents:
+        return 'managed'
+    return 'system'
+
+
+def _set_media_runtime(state, message, source=None):
+    _MEDIA_RUNTIME.update({
+        'state': state,
+        'platform': f'{platform.system().lower()}-{platform.machine().lower()}',
+        'source': source,
+        'message': message,
+    })
+
+
+def _runtime_is_ready():
+    if not configure_ffmpeg_runtime():
+        return False
+    # POSIX discovery validates drawtext/libx264; the Windows branch preserves
+    # the existing PATH contract, so run the full capability check there too.
+    return not (os.name == 'nt') or (Config.has_ffmpeg() and Config.has_ffprobe())
+
+
+def ensure_media_runtime():
+    """Make media tools ready before the server accepts user work.
+
+    Existing native tools are always preferred. On x86_64 Linux/WSL, a missing
+    runtime is filled with the repository's pinned, checksum-verified user-space
+    installer. Other platforms remain usable for manually installed native
+    tools, but never receive an incompatible Linux download.
+    """
+    if _runtime_is_ready():
+        source = _runtime_source(_ACTIVE_FFMPEG_DIR)
+        _set_media_runtime('ready', 'FFmpeg and FFprobe are ready.', source)
+        return get_media_runtime_status()
+
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if os.environ.get('CLIPFORGE_FFMPEG_DIR'):
+        _set_media_runtime(
+            'failed',
+            'CLIPFORGE_FFMPEG_DIR is set, but it does not contain a working native '
+            'FFmpeg/FFprobe pair with drawtext and libx264.',
+            'configured',
+        )
+        return get_media_runtime_status()
+    if system != 'linux' or machine not in {'x86_64', 'amd64'}:
+        _set_media_runtime(
+            'unsupported',
+            'Automatic media setup is available for x86_64 Linux/WSL. Install '
+            'native FFmpeg and FFprobe with drawtext, libx264, and usable fonts '
+            'then restart ClipForge.',
+        )
+        return get_media_runtime_status()
+
+    try:
+        from scripts.setup_ffmpeg_wsl import install
+
+        install(Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg')
+        if _runtime_is_ready():
+            _set_media_runtime(
+                'ready',
+                'ClipForge installed a verified FFmpeg/FFprobe runtime in your user directory.',
+                'managed',
+            )
+            return get_media_runtime_status()
+        raise RuntimeError('The installed tools did not pass the runtime capability check.')
+    except Exception:
+        _set_media_runtime(
+            'failed',
+            'Automatic media setup could not finish. Check your network and permissions, '
+            'or install native FFmpeg/FFprobe manually, then restart ClipForge.',
+        )
+        # Keep the detailed cause in the backend log without exposing filesystem
+        # details through the public status response.
+        _LOGGER.exception('Automatic media runtime setup failed')
+        return get_media_runtime_status()
+
+
+def get_media_runtime_status():
+    return dict(_MEDIA_RUNTIME)
+
+
+def configure_ytdlp_runtime():
+    """Make a venv-installed yt-dlp executable visible to child processes."""
+    executable_dir = Path(sys.executable).resolve().parent
+    candidate = executable_dir / ('yt-dlp.exe' if os.name == 'nt' else 'yt-dlp')
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        entries = [str(executable_dir)]
+        entries.extend(item for item in os.environ.get('PATH', '').split(os.pathsep)
+                       if item and Path(item).expanduser() != executable_dir)
+        os.environ['PATH'] = os.pathsep.join(entries)
+        return True
+    return bool(shutil.which('yt-dlp'))
+
+
+def ensure_ytdlp_runtime():
+    """Install the declared Python yt-dlp dependency if a clone lacks it."""
+    if configure_ytdlp_runtime() or importlib.util.find_spec('yt_dlp') is not None:
+        return True
+    try:
+        subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', 'yt-dlp>=2024.8'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return configure_ytdlp_runtime() or importlib.util.find_spec('yt_dlp') is not None
 
 
 class Config:
@@ -205,14 +342,26 @@ class Config:
 
     @staticmethod
     def has_ytdlp():
-        return shutil.which('yt-dlp') is not None
+        configure_ytdlp_runtime()
+        return bool(shutil.which('yt-dlp') or importlib.util.find_spec('yt_dlp') is not None)
 
     @staticmethod
     def get_env_status():
+        has_ffmpeg = Config.has_ffmpeg()
+        has_ffprobe = Config.has_ffprobe()
+        runtime = get_media_runtime_status()
+        if has_ffmpeg and has_ffprobe and runtime['state'] == 'not_checked':
+            runtime = {
+                **runtime,
+                'state': 'ready',
+                'source': _runtime_source(_ACTIVE_FFMPEG_DIR),
+                'message': 'FFmpeg and FFprobe are ready.',
+            }
         return {
             'dataDir': Config.get_data_dir(),
-            'hasFfmpeg': Config.has_ffmpeg(),
-            'hasFfprobe': Config.has_ffprobe(),
+            'hasFfmpeg': has_ffmpeg,
+            'hasFfprobe': has_ffprobe,
+            'mediaRuntime': runtime,
             'hasDeepgramKey': bool(os.environ.get('DEEPGRAM_API_KEY', '').strip()),
             'hasDeepseekKey': bool(os.environ.get('DEEPSEEK_API_KEY', '').strip()),
             'hasAnthropicKey': bool(os.environ.get('ANTHROPIC_API_KEY', '').strip()),

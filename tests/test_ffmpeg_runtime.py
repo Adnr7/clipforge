@@ -1,5 +1,7 @@
 import os
 import subprocess
+from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -119,3 +121,94 @@ def test_relative_override_stays_usable_after_changing_directory(tmp_path, monke
     assert config.configure_ffmpeg_runtime()
     monkeypatch.chdir(tmp_path.parent)
     assert subprocess.run(['ffmpeg', '-version'], check=False).returncode == 0
+
+
+def test_ensure_media_runtime_bootstraps_supported_linux_without_shell_path(monkeypatch):
+    monkeypatch.setattr(config, '_MEDIA_RUNTIME', {
+        'state': 'not_checked', 'platform': '', 'source': None,
+        'message': 'not checked',
+    })
+    monkeypatch.setattr(config.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(config.platform, 'machine', lambda: 'x86_64')
+    monkeypatch.delenv('CLIPFORGE_FFMPEG_DIR', raising=False)
+    active = Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg' / '6.0' / 'bin'
+    calls = []
+
+    def configure():
+        calls.append(True)
+        if len(calls) == 1:
+            return False
+        config._ACTIVE_FFMPEG_DIR = active
+        return True
+
+    monkeypatch.setattr(config, 'configure_ffmpeg_runtime', configure)
+    install = Mock()
+    monkeypatch.setattr('scripts.setup_ffmpeg_wsl.install', install)
+
+    result = config.ensure_media_runtime()
+
+    assert result['state'] == 'ready'
+    assert result['source'] == 'managed'
+    install.assert_called_once()
+    assert len(calls) == 2
+
+
+def test_ensure_media_runtime_does_not_download_on_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(config, '_MEDIA_RUNTIME', {
+        'state': 'not_checked', 'platform': '', 'source': None,
+        'message': 'not checked',
+    })
+    monkeypatch.setattr(config.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(config.platform, 'machine', lambda: 'arm64')
+    monkeypatch.setattr(config, 'configure_ffmpeg_runtime', lambda: False)
+    install = Mock(side_effect=AssertionError('Linux bootstrap must not run on macOS'))
+    monkeypatch.setattr('scripts.setup_ffmpeg_wsl.install', install)
+
+    result = config.ensure_media_runtime()
+
+    assert result['state'] == 'unsupported'
+    install.assert_not_called()
+
+
+def test_ensure_media_runtime_reports_failed_bootstrap_without_blocking_startup(monkeypatch):
+    monkeypatch.setattr(config, '_MEDIA_RUNTIME', {
+        'state': 'not_checked', 'platform': '', 'source': None,
+        'message': 'not checked',
+    })
+    monkeypatch.setattr(config.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(config.platform, 'machine', lambda: 'x86_64')
+    monkeypatch.setattr(config, 'configure_ffmpeg_runtime', lambda: False)
+    monkeypatch.delenv('CLIPFORGE_FFMPEG_DIR', raising=False)
+    monkeypatch.setattr('scripts.setup_ffmpeg_wsl.install', Mock(side_effect=OSError('offline')))
+
+    result = config.ensure_media_runtime()
+
+    assert result['state'] == 'failed'
+    assert 'restart ClipForge' in result['message']
+
+
+def test_ytdlp_runtime_prefers_the_active_python_environment_script(tmp_path, monkeypatch):
+    executable = tmp_path / 'venv' / 'bin' / 'python'
+    executable.parent.mkdir(parents=True)
+    executable.write_text('')
+    ytdlp = executable.parent / 'yt-dlp'
+    ytdlp.write_text('#!/bin/sh\n')
+    ytdlp.chmod(0o755)
+    monkeypatch.setattr(config.sys, 'executable', str(executable))
+    monkeypatch.setenv('PATH', '/path-that-does-not-exist')
+
+    assert config.configure_ytdlp_runtime()
+    assert os.environ['PATH'].split(os.pathsep)[0] == str(executable.parent)
+    assert config.Config.has_ytdlp()
+
+
+def test_ensure_ytdlp_runtime_installs_the_declared_dependency_when_missing(monkeypatch):
+    monkeypatch.setattr(config, 'configure_ytdlp_runtime', Mock(side_effect=[False, True]))
+    monkeypatch.setattr(config.importlib.util, 'find_spec', Mock(return_value=None))
+    run = Mock()
+    monkeypatch.setattr(config.subprocess, 'run', run)
+
+    assert config.ensure_ytdlp_runtime()
+    assert run.call_args.args[0][0] == config.sys.executable
+    assert run.call_args.args[0][1:3] == ['-m', 'pip']
+    assert 'yt-dlp>=2024.8' in run.call_args.args[0]

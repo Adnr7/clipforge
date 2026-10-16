@@ -9,6 +9,8 @@ license or a claimed/flagged status).
 import subprocess
 import json
 import os
+import importlib.util
+import sys
 import threading
 from collections import deque
 from urllib.parse import parse_qs, urlparse
@@ -16,6 +18,11 @@ from urllib.parse import parse_qs, urlparse
 
 _RESULT_PREFIX = '__CLIPFORGE_RESULT__'
 _DOWNLOAD_TIMEOUT = 600
+
+
+def _yt_dlp_command():
+    """Prefer the active Python environment's module over a PATH-only script."""
+    return [sys.executable, '-m', 'yt_dlp'] if importlib.util.find_spec('yt_dlp') else ['yt-dlp']
 
 
 def _video_url_error(url):
@@ -48,7 +55,7 @@ def check_youtube_copyright(url: str) -> dict:
     error = _video_url_error(url)
     if error:
         return {'ok': False, 'error': error}
-    cmd = ['yt-dlp', '--ignore-config', '--dump-single-json', '--no-warnings', '--no-playlist', '--', url]
+    cmd = [*_yt_dlp_command(), '--ignore-config', '--dump-single-json', '--no-warnings', '--no-playlist', '--', url]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
@@ -107,7 +114,7 @@ def download_youtube_video(url: str, output_dir: str, progress_cb=None) -> dict:
     output_template = os.path.join(output_dir, '%(id)s.%(ext)s')
 
     cmd = [
-        'yt-dlp',
+        *_yt_dlp_command(),
         '--ignore-config',
         '-f', 'bv*[height<=1080]+ba/b[height<=1080]',
         '--merge-output-format', 'mp4',
