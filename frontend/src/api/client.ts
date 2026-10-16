@@ -72,6 +72,30 @@ export interface ProviderProfilesResponse {
   fallback?: { llm?: string | null; transcription?: string | null }
 }
 
+export interface ProviderModel {
+  id: string
+  label: string
+  ownedBy?: string
+  contextLength?: number
+  supportsImages?: boolean
+}
+
+export interface ProviderModelsResponse {
+  kind: ProviderProfile['kind']
+  provider: string
+  source: 'remote' | 'local'
+  models: ProviderModel[]
+  manualEntryAllowed: boolean
+}
+
+export interface ProviderModelsRequest {
+  kind: ProviderProfile['kind']
+  provider: string
+  profileId?: string
+  apiKey?: string
+  baseUrl?: string
+}
+
 export interface CaptionSettings {
   enabled?: boolean
   uppercase?: boolean
@@ -196,6 +220,12 @@ export interface EnvironmentStatus {
   dataDir: string
   hasFfmpeg: boolean
   hasFfprobe: boolean
+  mediaRuntime?: {
+    state: 'ready' | 'failed' | 'unsupported' | 'not_checked'
+    platform: string
+    source?: 'system' | 'configured' | 'managed' | null
+    message: string
+  }
   hasDeepgramKey: boolean
   hasDeepseekKey: boolean
   hasAnthropicKey: boolean
@@ -356,6 +386,10 @@ export const api = {
   getSettings: (signal?: AbortSignal) => request<Settings>('/settings', { signal }),
   getRenderSettings: (signal?: AbortSignal) => request<RenderSettingsContract>('/render-settings', { signal }),
   listProviderProfiles: (signal?: AbortSignal) => request<ProviderProfilesResponse>('/provider-profiles', { signal }),
+  listProviderModels: (data: ProviderModelsRequest, signal?: AbortSignal) =>
+    request<ProviderModelsResponse>('/provider-models', {
+      method: 'POST', body: JSON.stringify(data), signal,
+    }),
   createProviderProfile: (data: { name: string; kind: ProviderProfile['kind']; provider: string; apiKey?: string; baseUrl?: string; model?: string }) =>
     request<ProviderProfile>('/provider-profiles', { method: 'POST', body: JSON.stringify(data) }),
   updateProviderProfile: (id: string, data: Partial<{ name: string; kind: ProviderProfile['kind']; provider: string; apiKey: string; baseUrl: string; model: string }>) =>

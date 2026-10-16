@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from backend.config import Config
 import os
 import threading
@@ -12,6 +12,7 @@ from backend.services.provider_service import (
     runtime_profile, validate_profile_payload, WHISPER_MODELS,
 )
 from backend.services.render_settings import CAPTION_PRESETS
+from backend.services.model_service import ModelDiscoveryError, discover_models
 
 _SETTINGS_LOCK = threading.Lock()
 _KEYS = {
@@ -28,6 +29,48 @@ system_bp = Blueprint('system', __name__)
 def get_status():
     """Return environment status — API keys, FFmpeg, etc."""
     return jsonify(Config.get_env_status())
+
+
+@system_bp.route('/provider-models', methods=['POST'])
+def provider_models():
+    """Fetch a bounded provider catalog without persisting the draft."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Request body must be a JSON object'}), 400
+    allowed = {'kind', 'provider', 'profileId', 'apiKey', 'baseUrl'}
+    unknown = set(data) - allowed
+    if unknown:
+        return jsonify({'error': f'Unknown model discovery field: {sorted(unknown)[0]}'}), 400
+
+    kind = data.get('kind', 'llm')
+    profile = None
+    try:
+        if data.get('profileId') is not None:
+            profile = get_profile(get_db(), data['profileId'], kind=kind)
+        provider = data.get('provider') or (profile['provider'] if profile is not None else None)
+        for field, maximum in (('apiKey', 2000), ('baseUrl', 500)):
+            value = data.get(field)
+            if value is not None and (not isinstance(value, str) or len(value) > maximum
+                                      or any(char in value for char in '\r\n\x00')):
+                raise ModelDiscoveryError(f'{field} is invalid or too long', 400)
+        if provider is not None and (not isinstance(provider, str) or len(provider) > 40
+                                     or any(char in provider for char in '\r\n\x00')):
+            raise ModelDiscoveryError('provider is invalid', 400)
+        result = discover_models(
+            provider,
+            kind,
+            profile=profile,
+            api_key=data.get('apiKey'),
+            base_url=data.get('baseUrl'),
+        )
+        return jsonify(result)
+    except ModelDiscoveryError as exc:
+        return jsonify({'error': str(exc)}), exc.status_code
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        current_app.logger.exception('Could not fetch provider models')
+        return jsonify({'error': 'Could not fetch provider models. Check the connection and try again.'}), 502
 
 
 @system_bp.route('/test-connection', methods=['POST'])

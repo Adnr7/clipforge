@@ -209,12 +209,13 @@ a fresh recommendation is requested.
 
 | Method | Path | Payload / result |
 | --- | --- | --- |
-| GET | `/status` | Tool availability and configured-key booleans; no secret values |
+| GET | `/status` | Tool availability, media-runtime setup state, and configured-key booleans; no secret values |
 | GET / PUT | `/settings` | Masked app defaults / allowlisted environment-setting writes |
 | GET | `/provider-profiles` | `{profiles,active,fallback}` |
 | POST | `/provider-profiles` | `{name,kind,provider,apiKey?,baseUrl?,model?}` → profile, `201` |
 | PUT / DELETE | `/provider-profiles/<profileId>` | Edit profile / remove it (`204`) |
 | PUT | `/provider-profiles/active` | `{kind,profileId}`; `null` clears active selection |
+| POST | `/provider-models` | `{kind,provider,profileId?,apiKey?,baseUrl?}` → normalized available models |
 | POST | `/test-connection` | `{provider?,profileId?}` → `{ok,message,latencyMs}` |
 
 Profile kinds are `llm` and `transcription`. Public fields include
@@ -222,6 +223,17 @@ Profile kinds are `llm` and `transcription`. Public fields include
 Blank/omitted update keys retain the existing secret. Custom LLM connections
 require base URL/model. Deepgram is fixed to nova-2/listen; Whisper uses a
 supported local model. [Connection details](development.md#provider-connections).
+
+Model discovery is explicit and read-only: it never creates, updates, or activates
+a profile. Saved profiles are identified by `profileId`; their credential is used
+on the server and is never returned to the browser. Unsaved drafts may provide a
+temporary `apiKey`/`baseUrl` for the request, but those values are not persisted by
+the catalog endpoint. OpenAI-compatible providers use `/models`, Claude uses its
+native `/v1/models`, Gemini uses its native model catalog, and Ollama lists
+installed models from `/api/tags`. Whisper and Deepgram return local/fixed
+catalogs. A returned model ID is a choice, not proof that the model supports
+vision, structured output, or every ClipForge operation; manual entry remains
+available when a provider does not expose a catalog.
 
 Settings writes use uppercase allowlisted names from `.env.example` plus
 supported model defaults (`WHISPER_MODEL`, `OLLAMA_MODEL`); reads use the UI's
