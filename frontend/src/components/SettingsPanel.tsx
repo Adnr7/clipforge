@@ -13,6 +13,7 @@ import { fallbackRenderContract } from '../api/renderDefaults'
 import { useEnvironment } from '../hooks/useEnvironment'
 import Modal from './ui/Modal'
 import ThemeSelect from './ui/ThemeSelect'
+import ProviderModelPicker from './ProviderModelPicker'
 import '../styles/settings.css'
 
 type ProfileKind = ProviderProfile['kind']
@@ -150,6 +151,13 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
   const currentSection = sections.find((item) => item.id === section)!
   const draft = draftKey ? drafts[draftKey] : undefined
   const savedProfile = profiles.find((profile) => profile.id === draft?.id)
+  const modelDiscoveryRequest = draft && draft.kind === 'llm' ? {
+    kind: draft.kind,
+    provider: draft.provider,
+    ...(draft.id ? { profileId: draft.id } : {}),
+    ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+    ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
+  } : null
   const visibleProfiles = profiles.filter((profile) => profile.kind === profileKind)
   const activeProfile = (kind: ProfileKind) => profiles.find((profile) => profile.kind === kind && profile.id === activeProfiles[kind])
   const fallbackProfile = (kind: ProfileKind) => profiles.find((profile) => profile.kind === kind && profile.id === fallbackProfiles[kind])
@@ -453,10 +461,12 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
                   </div>
                   <p id="settings-provider-locked" className="settings-help">Provider type is fixed. Add a separate profile to use a different provider.</p>
                   {draft.provider !== 'whisper' && <label className="field">API key<input className="input-field" type="password" autoComplete="new-password" spellCheck={false} required={draft.provider === 'deepgram' && !savedProfile?.hasApiKey} maxLength={2000} value={draft.apiKey} onChange={(event) => changeDraft({ apiKey: event.target.value })} placeholder={savedProfile?.hasApiKey ? 'Saved · leave blank to keep' : draft.provider === 'ollama' ? 'Optional for local Ollama' : 'Enter this profile’s key'} /><span className="field-hint">{savedProfile?.hasApiKey ? 'A profile key is saved.' : 'This profile uses its own credentials.'} Saved API keys are hidden (write-only). Leave blank to keep the saved key; enter a new key to replace it.</span></label>}
-                  {draft.kind === 'llm' && <div className="settings-fields">
-                    <label className="field">Model<input className="input-field" required={draft.provider === 'custom'} maxLength={200} value={draft.model} onChange={(event) => changeDraft({ model: event.target.value })} placeholder={draft.provider === 'custom' ? 'Required model identifier' : !savedProfile?.model && savedProfile?.effectiveModel ? savedProfile.effectiveModel : 'Leave blank for provider default'} /><span className="field-hint">{draft.provider === 'custom' ? 'Enter the exact model identifier for this endpoint.' : 'Blank uses the current server/provider default.'}</span></label>
-                    <label className="field">Base URL<input className="input-field" type="url" pattern="https?://.+" required={draft.provider === 'custom'} maxLength={500} value={draft.baseUrl} onChange={(event) => changeDraft({ baseUrl: event.target.value })} placeholder={draft.provider === 'custom' ? 'https://provider.example/v1' : !savedProfile?.baseUrl && savedProfile?.effectiveBaseUrl ? savedProfile.effectiveBaseUrl : draft.provider === 'ollama' ? 'http://localhost:11434/v1' : 'Leave blank for provider default'} /><span className="field-hint">{draft.provider === 'claude' ? 'An override must be the full Anthropic messages endpoint.' : 'Use an HTTP or HTTPS API base URL.'}</span></label>
-                  </div>}
+                   {draft.kind === 'llm' && <>
+                      <div className="settings-fields">
+                        <div className="field settings-model-field"><label htmlFor="provider-profile-model">Model</label><div className="settings-model-input-row"><input id="provider-profile-model" className="input-field" required={draft.provider === 'custom'} maxLength={200} value={draft.model} onChange={(event) => changeDraft({ model: event.target.value })} placeholder={draft.provider === 'custom' ? 'Required model identifier' : !savedProfile?.model && savedProfile?.effectiveModel ? savedProfile.effectiveModel : 'Leave blank for provider default'} />{modelDiscoveryRequest && <ProviderModelPicker request={modelDiscoveryRequest} value={draft.model} onSelect={(model) => changeDraft({ model })} disabled={!!busy} />}</div><span className="field-hint">{draft.provider === 'custom' ? 'Choose a model from Fetch models or enter the exact model identifier manually.' : 'Choose a model from Fetch models, or leave blank for the current server/provider default.'}</span></div>
+                        <label className="field">Base URL<input className="input-field" type="url" pattern="https?://.+" required={draft.provider === 'custom'} maxLength={500} value={draft.baseUrl} onChange={(event) => changeDraft({ baseUrl: event.target.value })} placeholder={draft.provider === 'custom' ? 'https://provider.example/v1' : !savedProfile?.baseUrl && savedProfile?.effectiveBaseUrl ? savedProfile.effectiveBaseUrl : draft.provider === 'ollama' ? 'http://localhost:11434/v1' : 'Leave blank for provider default'} /><span className="field-hint">{draft.provider === 'claude' ? 'An override must be the full Anthropic messages endpoint.' : 'Use an HTTP or HTTPS API base URL.'}</span></label>
+                      </div>
+                    </>}
                   {draft.provider === 'whisper' && <label className="field">Whisper model<select className="input-field" value={draft.model} onChange={(event) => changeDraft({ model: event.target.value })}><option value="">Use Processing default</option>{draft.model && !whisperModels.includes(draft.model) && <option value={draft.model}>{draft.model}</option>}{whisperModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><span className="field-hint">Runs on the ClipForge server. No API key required.</span></label>}
                   {draft.provider === 'deepgram' && <div className="settings-card"><h4>Server transcription connection</h4><p className="settings-help">Model: nova-2</p><p className="settings-help">Base URL: https://api.deepgram.com/v1/listen</p><p className="settings-help">The server fixes the Deepgram model and endpoint; only the saved profile key is selected.</p></div>}
                   <p className="settings-help">{draft.kind === 'llm' ? 'Save & test and Save & activate both save these fields first.' : draft.provider === 'deepgram' ? 'Save & activate selects this cloud connection.' : 'Save & activate selects this local transcription profile.'} {draft.id ? 'Deleting an active profile restores fallback settings.' : 'Creating a profile keeps the current active connection until you activate it.'} Use the profile actions above to save this draft; Save settings saves workspace defaults.</p>
@@ -493,9 +503,10 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
           </fieldset>}
 
           {section === 'environment' && <div className="settings-section-body">
-            {statusError && <div className="notice notice-error" role="alert"><span>{statusError}</span></div>}
-            <div className="settings-environment-list">{([['FFmpeg', 'Video rendering', status?.hasFfmpeg], ['FFprobe', 'Media inspection', status?.hasFfprobe], ['yt-dlp', 'YouTube import', status?.hasYtdlp]] as const).map(([label, description, installed]) => <div className="settings-row" key={label}><div><strong>{label}</strong><p className="settings-help">{description}</p></div><span className={`badge ${installed ? 'badge-success' : 'badge-neutral'}`}>{status ? installed ? 'Installed' : 'Missing' : statusError ? 'Unavailable' : 'Checking…'}</span></div>)}</div>
-            <div className="settings-card"><h4>Data directory</h4><p className="settings-path">{settings?.dataDir || status?.dataDir || 'Unavailable'}</p><p className="settings-help">Media and rendered files are stored on this server.</p></div>
+             {statusError && <div className="notice notice-error" role="alert"><span>{statusError}</span></div>}
+             <div className="settings-environment-list">{([['FFmpeg', 'Video rendering', status?.hasFfmpeg], ['FFprobe', 'Media inspection', status?.hasFfprobe], ['yt-dlp', 'YouTube import', status?.hasYtdlp]] as const).map(([label, description, installed]) => <div className="settings-row" key={label}><div><strong>{label}</strong><p className="settings-help">{description}</p></div><span className={`badge ${installed ? 'badge-success' : 'badge-neutral'}`}>{status ? installed ? 'Installed' : 'Missing' : statusError ? 'Unavailable' : 'Checking…'}</span></div>)}</div>
+             {status?.mediaRuntime && <div className="settings-card"><h4>Media runtime setup</h4><p className="settings-help">{status.mediaRuntime.message}</p><p className="settings-help">Platform: {status.mediaRuntime.platform} · Source: {status.mediaRuntime.source || 'not available'}</p><p className="settings-help">On supported x86_64 Linux/WSL systems, ClipForge installs a verified user-space runtime automatically when the server starts. Windows and macOS require native FFmpeg/FFprobe on PATH.</p></div>}
+             <div className="settings-card"><h4>Data directory</h4><p className="settings-path">{settings?.dataDir || status?.dataDir || 'Unavailable'}</p><p className="settings-help">Media and rendered files are stored on this server.</p></div>
             <p className="settings-help">Rendering runs on the ClipForge server. Cloud providers receive the audio or transcript needed for the selected operation. API keys are write-only.</p>
             <button type="button" className="text-button" onClick={() => setSection('providers')}>Manage connections in Providers <ArrowRight size={16} aria-hidden="true" /></button>
           </div>}

@@ -36,7 +36,7 @@ type MockState = {
   }; environmentKeys: Record<string, string>; profiles: ProfileFixture[]; activeProfiles: { llm?: string | null; transcription?: string | null }
   renderSettingsSaves: ProjectRenderSettings[]; analysisRequests: { mode: 'auto' | 'transcript' | 'visual'; brief: string }[]
   previewFrames: Record<string, unknown>[]; suggestions: Record<string, unknown>[]; suggestionRequests: Record<string, unknown>[]
-  renderRequests: { candidateId: string; body: Record<string, unknown> }[]; manualRequests: Record<string, unknown>[]; batchStyles: string[]; exportRequests: string[]
+  renderRequests: { candidateId: string; body: Record<string, unknown> }[]; manualRequests: Record<string, unknown>[]; batchStyles: string[]; exportRequests: string[]; modelRequests: Record<string, unknown>[]
   clipStatusRequests: string[]; legacyJobStatusRequests: string[]; detailReads: number; batchProjectReads: number
   batchActive: boolean; batchIds: string[]; failNextProjectRead: boolean; delaySettingsMs: number; delaySelectionMs: number; youtubeTerminal: boolean
 }
@@ -64,14 +64,14 @@ const completedClips: ClipFixture[] = [
   { id: 'failed', candidate_id: 'c2', status: 'error', output_path: null, render_log: 'FFmpeg could not read media', created_at: '2026-10-04T12:00:00' },
 ]
 
-async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?: ClipFixture[]; delaySettingsMs?: number } = {}) {
+async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?: ClipFixture[]; delaySettingsMs?: number; mediaReady?: boolean } = {}) {
   if (options.onboarded !== false) await page.addInitScript(() => localStorage.setItem('clipforge.onboarded', '1'))
   const state: MockState = {
     saved: [], events: [], project: { ...projectFixture }, candidates: candidatesFixture.map((candidate) => ({ ...candidate })),
     transcript: transcriptFixture, clips: (options.initialClips || completedClips).map((clip) => ({ ...clip })), uploads: [], created: [],
     settings: { llmProvider: 'deepseek', transcriptionMode: 'local', whisperModel: 'base', captionStyle: 'classic', dataDir: '/data', customBaseUrl: '', customModel: '', ollamaModel: 'llama3.2' },
      environmentKeys: {}, profiles: [], activeProfiles: {}, renderSettingsSaves: [], analysisRequests: [], previewFrames: [], suggestions: [], suggestionRequests: [],
-    renderRequests: [], manualRequests: [], batchStyles: [], exportRequests: [], clipStatusRequests: [], legacyJobStatusRequests: [], detailReads: 0,
+     renderRequests: [], manualRequests: [], batchStyles: [], exportRequests: [], modelRequests: [], clipStatusRequests: [], legacyJobStatusRequests: [], detailReads: 0,
     batchProjectReads: 0, batchActive: false, batchIds: [], failNextProjectRead: false, delaySettingsMs: options.delaySettingsMs || 0, delaySelectionMs: 0, youtubeTerminal: true,
   }
   const jobs = { transcription: { status: 'idle' }, analysis: { status: 'idle' } }
@@ -94,12 +94,15 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
     const json = (body: unknown, status = 200) => route.fulfill({ json: body, status })
     const body = () => (request.postDataJSON() || {}) as Record<string, unknown>
 
-    if (path === '/status') {
-      return json({ dataDir: '/data', hasFfmpeg: true, hasFfprobe: true, hasYtdlp: true, llmProvider: state.settings.llmProvider,
-        hasDeepseekKey: !!state.environmentKeys.DEEPSEEK_API_KEY, hasDeepgramKey: !!state.environmentKeys.DEEPGRAM_API_KEY,
-        hasAnthropicKey: !!state.environmentKeys.ANTHROPIC_API_KEY, hasGeminiKey: !!state.environmentKeys.GEMINI_API_KEY,
-        hasOpenaiKey: !!state.environmentKeys.OPENAI_API_KEY, hasOpenrouterKey: !!state.environmentKeys.OPENROUTER_API_KEY,
-        hasGroqKey: !!state.environmentKeys.GROQ_API_KEY, hasCustomProvider: !!state.environmentKeys.CUSTOM_API_KEY && !!state.settings.customBaseUrl })
+     if (path === '/status') {
+       const mediaReady = options.mediaReady !== false
+       return json({ dataDir: '/data', hasFfmpeg: mediaReady, hasFfprobe: mediaReady, hasYtdlp: true, llmProvider: state.settings.llmProvider,
+         hasDeepseekKey: !!state.environmentKeys.DEEPSEEK_API_KEY, hasDeepgramKey: !!state.environmentKeys.DEEPGRAM_API_KEY,
+         hasAnthropicKey: !!state.environmentKeys.ANTHROPIC_API_KEY, hasGeminiKey: !!state.environmentKeys.GEMINI_API_KEY,
+         hasOpenaiKey: !!state.environmentKeys.OPENAI_API_KEY, hasOpenrouterKey: !!state.environmentKeys.OPENROUTER_API_KEY,
+         hasGroqKey: !!state.environmentKeys.GROQ_API_KEY, hasCustomProvider: !!state.environmentKeys.CUSTOM_API_KEY && !!state.settings.customBaseUrl,
+         mediaRuntime: mediaReady ? { state: 'ready', platform: 'test-linux-x86_64', source: 'system', message: 'FFmpeg and FFprobe are ready.' }
+           : { state: 'failed', platform: 'test-linux-x86_64', source: null, message: 'Automatic media setup failed. Restart ClipForge or install native FFmpeg/FFprobe.' } })
     }
     if (path === '/settings') {
       if (method === 'PUT') {
@@ -121,6 +124,11 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
     if (path === '/test-connection') {
       const values = body(); state.events.push(values.profileId ? `profile:test:${values.profileId}` : `connection:test:${stringValue(values, 'provider')}`)
       return json({ ok: true, message: 'Connected', latencyMs: 23 })
+    }
+    if (path === '/provider-models' && method === 'POST') {
+      const values = body(); state.modelRequests.push(values)
+      return json({ kind: values.kind || 'llm', provider: values.provider || 'custom', source: 'remote', manualEntryAllowed: true,
+        models: [{ id: 'fixture-model-fast', label: 'Fixture Model Fast', ownedBy: 'Fixture' }, { id: 'fixture-model-vision', label: 'Fixture Model Vision', ownedBy: 'Fixture' }] })
     }
     if (path === '/render-settings' && method === 'GET') return json(fallbackRenderContract)
     if (path === '/provider-profiles') {
@@ -319,6 +327,13 @@ test('initial system theme, exactly three explicit themes, persistence, responsi
   expect(external).toEqual([])
 })
 
+test('media setup status explains an automatic failure and blocks new imports', async ({ page }) => {
+  await mockApi(page, { mediaReady: false }); await page.goto('/')
+  await expect(page.getByText('Automatic media setup failed. Restart ClipForge or install native FFmpeg/FFprobe.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New project', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'View setup guide', exact: true })).toBeVisible()
+})
+
 test('settings sidebar renders one section, keeps drafts, persists provider CRUD and blocks close while busy', async ({ page }) => {
   const state = await mockApi(page, { delaySettingsMs: 150 }); await page.goto('/')
   const settingsButton = page.getByRole('button', { name: 'Settings', exact: true }); await settingsButton.click()
@@ -349,7 +364,7 @@ test('settings sidebar renders one section, keeps drafts, persists provider CRUD
   expect(state.events.slice(0, 2)).toEqual(['profile:create:profile-1', 'profile:test:profile-1'])
 
   await dialog.getByLabel('Profile name', { exact: true }).fill('Studio analysis edited')
-  await dialog.locator('label.field').filter({ hasText: /^Model/ }).locator('input').fill('deepseek-chat')
+  await dialog.locator('#provider-profile-model').fill('deepseek-chat')
   await dialog.getByRole('button', { name: 'Save & activate', exact: true }).click()
   await expect(dialog.getByText(/saved and active for analysis/)).toBeVisible()
   expect(state.events.slice(2, 4)).toEqual(['profile:update:profile-1', 'profile:active:llm:profile-1'])
@@ -373,6 +388,25 @@ test('settings sidebar renders one section, keeps drafts, persists provider CRUD
   expect(state.profiles).toHaveLength(0)
 })
 
+test('provider model picker fetches a catalog and persists the selected model', async ({ page }) => {
+  const state = await mockApi(page); await page.goto('/')
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await dialog.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Providers', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Analysis / LLM', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Add profile', exact: true }).click()
+  await dialog.getByRole('button', { name: /DeepSeek/ }).click()
+  await dialog.getByLabel('Profile name', { exact: true }).fill('Catalog connection')
+  await dialog.locator('input[type="password"]').fill('fixture-key')
+  await dialog.getByRole('button', { name: 'Fetch models', exact: true }).click()
+  await expect(dialog.getByText(/2 models available/)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Use fixture-model-vision', exact: true }).click()
+  await expect(dialog.locator('#provider-profile-model')).toHaveValue('fixture-model-vision')
+  expect(state.modelRequests[0]).toMatchObject({ kind: 'llm', provider: 'deepseek', apiKey: 'fixture-key' })
+  await dialog.getByRole('button', { name: 'Create profile', exact: true }).click()
+  await expect.poll(() => state.profiles[0]?.model).toBe('fixture-model-vision')
+})
+
 test('onboarding saves typed cloud keys before testing and persists completion', async ({ page }) => {
   const state = await mockApi(page, { onboarded: false }); await page.goto('/')
   await page.getByRole('button', { name: 'Set up ClipForge' }).click(); await page.getByRole('button', { name: 'Continue', exact: true }).click()
@@ -382,6 +416,20 @@ test('onboarding saves typed cloud keys before testing and persists completion',
   expect(state.saved[0]).toMatchObject({ DEEPSEEK_API_KEY: 'fixture-analysis', DEEPGRAM_API_KEY: 'fixture-audio', LLM_PROVIDER: 'deepseek', TRANSCRIPTION_MODE: 'cloud' })
   await page.getByRole('button', { name: 'Save & continue' }).click(); await page.getByRole('button', { name: 'Open projects', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible(); expect(await page.evaluate(() => localStorage.getItem('clipforge.onboarded'))).toBe('1')
+})
+
+test('custom onboarding provider fetches models and uses the selected model', async ({ page }) => {
+  const state = await mockApi(page, { onboarded: false }); await page.goto('/')
+  await page.getByRole('button', { name: 'Set up ClipForge' }).click(); await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await page.getByLabel('Analysis provider').selectOption('custom')
+  await page.getByLabel('Custom API key').fill('fixture-custom-key')
+  await page.getByLabel('Base URL').fill('https://fixture.example/v1')
+  await page.getByRole('button', { name: 'Fetch models', exact: true }).click()
+  await expect(page.getByText(/2 models available/)).toBeVisible()
+  await page.getByRole('button', { name: 'Use fixture-model-fast', exact: true }).click()
+  await expect(page.getByLabel('Model', { exact: true })).toHaveValue('fixture-model-fast')
+  await page.getByRole('button', { name: 'Save & continue', exact: true }).click()
+  expect(state.saved[0]).toMatchObject({ LLM_PROVIDER: 'custom', CUSTOM_API_KEY: 'fixture-custom-key', CUSTOM_BASE_URL: 'https://fixture.example/v1', CUSTOM_MODEL: 'fixture-model-fast' })
 })
 
 test('onboarding local mode saves canonical local and Ollama settings', async ({ page }) => {

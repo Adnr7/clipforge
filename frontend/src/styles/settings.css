@@ -38,6 +38,9 @@
 .settings-dialog .settings-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; min-width: 0; }
 .settings-dialog .settings-row > div { min-width: 0; overflow-wrap: anywhere; }
 .settings-dialog .settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; min-width: 0; }
+.settings-dialog .settings-model-input-row { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+.settings-dialog .settings-model-input-row > .input-field { flex: 1 1 auto; min-width: 0; }
+.settings-dialog .settings-model-input-row .provider-model-picker { flex: 0 0 auto; }
 .settings-dialog .settings-key-notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-left: 3px solid var(--accent-primary); background: var(--accent-soft); color: var(--text-primary); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-dialog .settings-key-notice > svg { flex-shrink: 0; margin-top: 3px; color: var(--accent-primary); }
 .settings-dialog .settings-current-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
