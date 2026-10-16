@@ -17,9 +17,9 @@ tests. Media integration coverage needs FFmpeg/FFprobe and fonts on `PATH`.
 ## Full checks
 
 ```bash
-# Repository root; virtual environment activated
-python -m pip install -r requirements-dev.txt
-python -B -m pytest -q --tb=short tests
+# Repository root; clean pinned setup
+make setup
+make test
 ```
 
 ```bash

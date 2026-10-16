@@ -21,9 +21,18 @@ the backend port.
 
 ## FFmpeg or FFprobe is missing
 
-Run `ffmpeg -version` and `ffprobe -version` in the same terminal used to start
-ClipForge. Install both tools and put their directory on `PATH`; on Windows,
-open a new terminal after changing `PATH`.
+On x86_64 Linux/WSL, the normal `python main.py --web` startup attempts to
+install a pinned, checksum-verified user-space runtime automatically. Restart
+ClipForge to retry a failed or interrupted download. The managed copy is stored
+under `~/.local/share/clipforge/ffmpeg/` and does not change the interactive
+shell's `PATH`.
+
+The dashboard and Settings → Environment show whether setup succeeded and the
+reason it failed. Run `ffmpeg -version` and `ffprobe -version` in the same
+terminal used to start ClipForge when diagnosing a manually configured runtime.
+Windows, macOS, ARM Linux, and other unsupported platforms must provide native
+FFmpeg and FFprobe on `PATH`; a Git clone cannot install system binaries or
+bypass OS permissions on every platform.
 
 Caption rendering requires a build with `drawtext` and usable fonts. Video
 encoding requires `libx264`. On Ubuntu/Debian, install `ffmpeg` and
@@ -36,6 +45,15 @@ platform-specific WebView dependencies described in the
 [pywebview installation guide](https://pywebview.flowrl.com/guide/installation.html).
 Install those before attempting desktop mode. Browser tests do not validate the
 native desktop runtime.
+
+## YouTube import is unavailable
+
+ClipForge checks the declared `yt-dlp` Python dependency when the backend starts
+and installs it into the active virtual environment if it is missing. Restart
+the backend with network access to retry setup. Settings → Environment reports
+the current `yt-dlp` state. Ollama and Whisper are optional local services and
+are not installed automatically; start Ollama and install Whisper only when you
+choose those processing modes.
 
 ## A provider is not configured or connection testing fails
 

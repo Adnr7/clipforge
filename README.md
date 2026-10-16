@@ -130,22 +130,73 @@ Visual analysis has its own single-pass sampled-frame contract.
 
 ## Getting started
 
-### Prerequisites
+### Reproducible Linux setup
 
-| Dependency | Requirement | Used for |
-| --- | --- | --- |
-| Python | **3.10+** | Backend and desktop launcher |
-| Node.js | **22.12+** | Building the interface and browser tests |
-| FFmpeg + FFprobe | On `PATH`, with `libx264`, `drawtext`, and usable fonts | Probe, previews, captions, and export |
-| Native WebView | Optional, platform-specific | Desktop window; browser mode does not need it |
+The repository pins Python in `.python-version`, Node in `.nvmrc`, Python
+dependencies in `requirements.lock`/`requirements-dev.lock`, and JavaScript
+dependencies in `frontend/package-lock.json`. On a clean Linux machine with
+Python 3.12, Node 22.12, and `make`:
 
 ```bash
 git clone https://github.com/Adnr7/clipforge.git
 cd clipforge
+make setup
+make build
+make test
+make run
 ```
 
+Open **http://127.0.0.1:5174**. On x86_64 Linux/WSL, the first startup also
+bootstraps a verified user-space FFmpeg/FFprobe runtime when native tools are not
+already available. `make setup` installs the declared Python and frontend
+dependencies locally; it does not install anything globally.
+
+The same project can run in Docker without a host Python or Node installation:
+
+```bash
+docker build -t clipforge:local .
+docker run --rm -p 5174:5174 -v clipforge-data:/data clipforge:local
+```
+
+The container includes FFmpeg, FFprobe, fonts, the locked Python runtime, and
+the production frontend. It stores application data in the named `clipforge-data`
+volume. For deployment, build and publish the image from a trusted registry, then
+run it with a persistent `/data` volume and a separately managed `.env` file; do
+not put credentials in the image or repository.
+
+### Prerequisites
+
+| Dependency | Requirement | Used for |
+| --- | --- | --- |
+| Python | **3.12** for the pinned clean-build path | Backend and desktop launcher |
+| Node.js | **22.12.0** for the pinned clean-build path | Building the interface and browser tests |
+| FFmpeg + FFprobe | Automatically bootstrapped on x86_64 Linux/WSL; native tools required on Windows/macOS/other architectures | Probe, previews, captions, and export |
+| Native WebView | Optional, platform-specific | Desktop window; browser mode does not need it |
+
+The `make setup` flow above is the preferred clean-machine path. Manual setup is
+also supported when you need to control the virtual environment or frontend
+installation separately.
+
 <details>
-<summary><strong>Install FFmpeg</strong></summary>
+<summary><strong>Media runtime setup</strong></summary>
+
+On **x86_64 Linux or WSL**, ClipForge automatically downloads a pinned,
+SHA-256-verified user-space FFmpeg/FFprobe runtime the first time you start the
+backend. It is installed under `~/.local/share/clipforge/ffmpeg/` and reused on
+future launches. No `sudo` or interactive package-manager step is required.
+
+The first launch needs network access. The runtime includes the `drawtext`
+filter and `libx264`; captions also need usable fonts installed in the Linux
+environment.
+
+The backend also checks the declared `yt-dlp` Python dependency at startup and
+installs it into the active virtual environment when it is missing. This enables
+YouTube import without requiring a separate system executable. Ollama and
+Whisper model weights remain optional because they are large, user-selected
+services rather than required by manual editing.
+
+If automatic setup fails, you can retry by restarting ClipForge or install the
+tools manually:
 
 ```bash
 # Ubuntu / Debian
@@ -159,6 +210,11 @@ On Windows, install an FFmpeg build containing FFprobe, add its `bin` directory
 to `PATH`, and open a new terminal. Verify both `ffmpeg -version` and
 `ffprobe -version`.
 
+Windows, macOS, ARM Linux, and other unsupported platforms currently require a
+native FFmpeg/FFprobe installation. A Git clone cannot install system binaries
+or bypass OS permissions on every platform; ClipForge detects native tools and
+shows platform-specific guidance when they are unavailable.
+
 </details>
 
 ### 1 · Install the backend
@@ -168,7 +224,7 @@ to `PATH`, and open a new terminal. Verify both `ffmpeg -version` and
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.lock
 ```
 
 **Windows PowerShell**
@@ -176,7 +232,7 @@ python -m pip install -r requirements.txt
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.lock
 ```
 
 ### 2 · Build the interface
@@ -280,10 +336,9 @@ See the [roadmap](docs/roadmap.md) for proposed improvements.
 ## Build with us
 
 ```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest -q tests
-
-npm --prefix frontend run build
+make setup
+make build
+make test
 npm --prefix frontend run lint
 # First time: install Chromium and supported-platform dependencies
 npm --prefix frontend exec -- playwright install --with-deps chromium

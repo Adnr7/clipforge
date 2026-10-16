@@ -1,11 +1,14 @@
-# Native FFmpeg for WSL without sudo
+# Native FFmpeg for Linux/WSL without sudo
 
 ClipForge's WSL backend needs Linux `ffmpeg` and `ffprobe` to read WSL paths
 such as `/home/...` and `/tmp/...`. Windows `.exe` files on the inherited
 `PATH` do not provide that runtime. An apt package extracted without all of its
 shared-library dependencies may be discoverable yet fail to execute.
 
-From the repository root, install the native, static tools in user space:
+ClipForge performs this same installation automatically when `main.py` starts on
+x86_64 Linux/WSL and no working native tools are found. The startup waits for
+the verified setup before accepting import/render work. Run the helper directly
+only when you want to prepare the runtime before launching the app:
 
 ```bash
 .venv/bin/python scripts/setup_ffmpeg_wsl.py
@@ -25,6 +28,12 @@ The FFmpeg asset is `ffmpeg-static` release `b6.0` (FFmpeg 6.0); FFprobe is the
 native `@ffprobe-installer/linux-x64` 5.2.0 asset (N-66595). Both are static
 Linux executables. Running the helper again reuses a working installation.
 Neither apt nor npm is needed by the helper.
+
+The setup is intentionally Linux-only. Windows and macOS must use native
+FFmpeg/FFprobe installations, and ARM Linux currently requires a compatible
+native installation. Cloning a repository cannot safely install system-wide
+binaries on every operating system, so unsupported platforms receive manual
+setup guidance in the app.
 
 `backend/config.py` discovers this install even if the venv is invoked directly
 without activation and `~/.local/bin` is absent from `PATH`. Startup prepends

@@ -24,7 +24,7 @@ documentation, focused fixes, tests, and features discussed in an issue.
 3. Install the backend development dependencies in your virtual environment:
 
    ```bash
-   python -m pip install -r requirements-dev.txt
+   python -m pip install -r requirements-dev.lock
    ```
 
 4. In `frontend/`, install browser-test prerequisites:
@@ -61,7 +61,7 @@ Restart the backend after Python edits; the Vite interface hot-reloads separatel
 From the repository root with the virtual environment activated:
 
 ```bash
-python -m pytest -q tests
+make test
 ```
 
 FFmpeg and FFprobe must be on `PATH` for media coverage. The tests create their

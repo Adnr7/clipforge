@@ -4,13 +4,14 @@
 
 ## Prerequisites and first setup
 
-Follow the [root installation guide](../README.md#getting-started) for Python
-3.10+, Node 22.12+, FFmpeg/FFprobe, a virtual environment, and the frontend build.
-Then install development tools:
+Follow the [root installation guide](../README.md#getting-started) for the pinned
+Python/Node versions, virtual environment, media runtime, and frontend build.
+The preferred clean-machine setup is `make setup`; it installs the locked
+development dependencies and runs `npm ci` locally:
 
 ```bash
-# Repository root; Python environment activated
-python -m pip install -r requirements-dev.txt
+# Repository root
+make setup
 
 # Frontend directory
 npm ci
@@ -19,8 +20,10 @@ npx playwright install --with-deps chromium
 
 | Dependency file | Purpose |
 | --- | --- |
-| `requirements.txt` | Application runtime |
-| `requirements-dev.txt` | Runtime plus pytest |
+| `requirements.txt` | Human-readable application runtime ranges |
+| `requirements.lock` | Pinned application runtime dependencies used by Docker |
+| `requirements-dev.lock` | Pinned runtime plus backend test dependencies |
+| `.python-version` / `.nvmrc` | Pinned Python and Node major/minor/runtime versions |
 | `requirements-whisper.txt` | Optional local Whisper; not needed for fixture-based tests |
 | `frontend/package-lock.json` | Reproducible JavaScript dependency installation with `npm ci` |
 
