@@ -71,13 +71,90 @@ def test_hallucinated_boundaries_quotes_and_rubrics_fail_before_review(change):
     model = Mock(return_value=json.dumps({'audience': 'Founders', 'candidates': [draft(**change)]}))
     with pytest.raises(ValueError):
         selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
-    assert model.call_count == 1
+    assert model.call_count == 2
 
 
 def test_critic_can_return_no_clips_instead_of_filling_a_quota():
     model = Mock(side_effect=[json.dumps({'audience': 'Founders', 'candidates': [draft()]}),
                              json.dumps({'reviews': []})])
     assert selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model) == []
+
+
+def test_malformed_scout_response_gets_one_bounded_correction_retry():
+    valid_scout = json.dumps({'audience': 'Founders', 'candidates': [draft()]})
+    valid_critic = json.dumps({'reviews': [{'candidateId': 0, 'selfContained': True,
+                              'assessment': GOOD, 'audienceReason': 'Useful pitch guidance.'}]})
+    model = Mock(side_effect=['{', valid_scout, valid_critic])
+    result = selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
+    assert len(result) == 1
+    assert model.call_count == 3
+    assert 'previous raw response' not in model.call_args_list[1].args[0]
+
+
+def test_two_malformed_scout_responses_stop_after_the_correction_retry():
+    model = Mock(side_effect=['{', '{'])
+    with pytest.raises(ValueError, match='scout response must be valid JSON'):
+        selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
+    assert model.call_count == 2
+
+
+@pytest.mark.parametrize('wrap', [
+    lambda value: '<think>private deliberation {not JSON}</think>\n' + value,
+    lambda value: 'Here is the requested result:\n```json\n' + value + '\n```\nDone.',
+    lambda value: '<think>private deliberation</think>\n```json\n' + value + '\n```',
+])
+def test_compatible_model_wrappers_do_not_discard_valid_verified_selection(wrap):
+    model = Mock(side_effect=lambda prompt, maximum: wrap(editorial_model(prompt, maximum)))
+    clips = selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
+    assert [(clip['start'], clip['end'], clip['score']) for clip in clips] == [(40, 65, 89)]
+    assert model.call_count == 2
+
+
+@pytest.mark.parametrize('text', [
+    '{"candidates": [], "candidates": []}', '{"score": NaN}',
+    '<think>unfinished deliberation {"candidates":[]}',
+    '```json\n{"candidates":[]}\n```\n```json\n{"candidates":[]}\n```',
+    '```json\n{"candidates":[]}\n```\n{"candidates":[{}]}',
+    '```json\n{"candidates":[\n```',
+])
+def test_wrapper_compatibility_still_rejects_ambiguous_or_incomplete_json(text):
+    with pytest.raises(ValueError):
+        selection.parse_model_object(text)
+
+
+def test_reasoning_models_get_compact_full_coverage_windows_and_room_for_the_final_answer(monkeypatch):
+    timed = Mock(return_value=[])
+    monkeypatch.setattr(llm_service, 'analyze_timed_transcript', timed)
+    llm_service.analyze_transcript('speech', 90, 'custom', profile={
+        'model': 'deepseek-ai/DeepSeek-V4-Flash-0731', 'base_url': 'https://inference.dahl.global/v1',
+        'api_key': 'fixture'}, transcript_data=CORPUS, audience_brief=AUDIENCE)
+    assert timed.call_args.kwargs == {'window_chars': 6000, 'response_tokens': 3000,
+                                      'scout_limit': 3, 'review_chars': 8000}
+
+
+def test_transcript_structured_schemas_are_exact_and_bound_response_fields():
+    scout = selection.transcript_scout_schema()
+    critic = selection.transcript_critic_schema()
+    assert scout['additionalProperties'] is False
+    assert critic['additionalProperties'] is False
+    assert scout['properties']['candidates']['items']['additionalProperties'] is False
+    assert critic['properties']['reviews']['items']['additionalProperties'] is False
+    assert 'score' not in scout['properties']['candidates']['items']['properties']
+    assert critic['properties']['reviews']['items']['properties']['candidateId']['maximum'] == selection.MAX_FINALISTS - 1
+
+
+def test_production_style_callback_receives_role_specific_structured_formats():
+    calls = []
+
+    def model(prompt, maximum, response_format=None):
+        calls.append((prompt, maximum, response_format))
+        return editorial_model(prompt, maximum)
+
+    assert selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
+    assert [call[1] for call in calls] == [4500, 4500]
+    assert calls[0][2]['type'] == 'json_schema'
+    assert calls[0][2]['json_schema']['name'] == 'transcript_scout'
+    assert calls[1][2]['json_schema']['name'] == 'transcript_critic'
 
 
 def test_quote_verification_does_not_treat_cpp_and_csharp_as_the_same_source():
@@ -87,7 +164,37 @@ def test_quote_verification_does_not_treat_cpp_and_csharp_as_the_same_source():
         openingQuote='Teach C# pointer lifetimes', closingQuote='Pair each allocation with ownership.')] }))
     with pytest.raises(ValueError, match='actual opening'):
         selection.analyze_timed_transcript(corpus, 90, '', AUDIENCE, model)
-    assert model.call_count == 1
+    assert model.call_count == 2
+
+
+@pytest.mark.parametrize('bad_draft', [
+    draft(openingQuote='Invented source opening'),
+    draft(startUnit=0, endUnit=3, openingQuote='Welcome to the show.',
+          closingQuote='Everyone cheered at the unexpected announcement.'),
+])
+def test_scout_can_repair_real_evidence_and_duration_errors(bad_draft):
+    model = Mock(side_effect=[
+        json.dumps({'audience': 'Founders', 'candidates': [bad_draft]}),
+        json.dumps({'audience': 'Founders', 'candidates': [draft()]}),
+        json.dumps({'reviews': [{'candidateId': 0, 'selfContained': True,
+                                'assessment': GOOD, 'audienceReason': 'Useful pitch guidance.'}]}),
+    ])
+    result = selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
+    assert [(clip['start'], clip['end']) for clip in result] == [(40, 65)]
+    assert 'Validation issue:' in model.call_args_list[1].args[0]
+    assert 'Invented source opening' not in model.call_args_list[1].args[0]
+    if bad_draft['endUnit'] == 3:
+        assert 'resolve to 90.00 seconds' in model.call_args_list[1].args[0]
+        assert 'Valid endUnit IDs for startUnit 0: [0, 1]' in model.call_args_list[1].args[0]
+
+
+def test_one_invalid_draft_does_not_discard_other_source_verified_ideas_after_correction():
+    scout = json.dumps({'audience': 'Founders', 'candidates': [draft(startUnit=999), draft()]})
+    model = Mock(side_effect=[scout, scout, json.dumps({'reviews': [{
+        'candidateId': 0, 'selfContained': True, 'assessment': GOOD,
+        'audienceReason': 'Useful pitch guidance.'}]})])
+    result = selection.analyze_timed_transcript(CORPUS, 90, '', AUDIENCE, model)
+    assert [(clip['start'], clip['end']) for clip in result] == [(40, 65)]
 
 
 def test_inferred_audience_is_labeled_and_provider_errors_do_not_expose_connection_data(monkeypatch):
@@ -220,7 +327,34 @@ def test_supported_providers_receive_the_same_audience_method_and_frozen_connect
     assert len(calls) == 2
     assert all(options['profile']['model'] == 'selected-editor-model' for _, options in calls)
     assert all(options['profile']['api_key'] == 'fixture-profile-key' for _, options in calls)
-    assert all(options['retries'] == 1 and options['timeout'] == (5, 60) for _, options in calls)
+    assert all(options['retries'] == 2 and options['timeout'] == (5, 60) for _, options in calls)
+
+
+def test_generic_gateway_schema_rejection_uses_json_object_for_scout_and_critic(monkeypatch):
+    calls = []
+
+    def call(prompt, _provider, **options):
+        calls.append(options['response_format'])
+        if len(calls) == 1:
+            raise llm_service.ProviderRequestError('Invalid request', 400)
+        return editorial_model(prompt, options['max_tokens'])
+
+    monkeypatch.setattr(llm_service, 'call_openai_compatible', call)
+    result = llm_service.analyze_transcript('speech', 90, 'custom', profile={
+        'model': 'chosen-model', 'base_url': 'https://editor.example.test/v1', 'api_key': 'fixture'},
+        transcript_data=CORPUS, audience_brief=AUDIENCE)
+    assert [(clip['start'], clip['end']) for clip in result] == [(40, 65)]
+    assert [value['type'] for value in calls] == ['json_schema', 'json_object', 'json_object']
+
+
+def test_custom_groq_profiles_get_the_same_smaller_full_coverage_budget(monkeypatch):
+    timed = Mock(return_value=[])
+    monkeypatch.setattr(llm_service, 'analyze_timed_transcript', timed)
+    llm_service.analyze_transcript('speech', 90, 'custom', profile={
+        'model': 'chosen-groq-model', 'base_url': 'https://api.groq.com/openai/v1', 'api_key': 'fixture'},
+        transcript_data=CORPUS, audience_brief=AUDIENCE)
+    assert timed.call_args.kwargs == {'window_chars': 4500, 'response_tokens': 2000,
+                                     'scout_limit': 4, 'review_chars': 8000}
 
 
 def configure_source(app):

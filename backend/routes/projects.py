@@ -122,7 +122,8 @@ def get_project_detail(project_id):
     project = dict(row)
     project.update(resolve_project_settings(project))
     try:
-        project['visualAnalysis'] = json.loads(project.get('visual_analysis_json') or 'null')
+        value = json.loads(project.get('visual_analysis_json') or 'null')
+        project['visualAnalysis'] = value if isinstance(value, dict) else None
     except (ValueError, TypeError):
         project['visualAnalysis'] = None
     transcript = db.execute(

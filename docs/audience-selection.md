@@ -22,7 +22,7 @@ the model is asked to infer a narrow audience from the source; metadata labels
 that assumption with `audienceInferred: true`.
 
 Manual and AI Edit share project-scoped audience fields. Changing them saves a
-draft but makes no model request. Analysis, recommendations, chat, and
+draft but makes no model request. Analysis, recommendations, and
 transcript-based look suggestions receive the structured brief when their
 buttons are used. Existing candidates keep their original explanation until a
 new analysis replaces them; changing a draft is not reranking.
@@ -113,32 +113,50 @@ satisfaction, predicted view counts, trend data, or guaranteed virality.
 | Critic shortlist | Up to 16, split into 16,000-character candidate-context batches |
 | Final results | Up to 8 source-bound, non-overlapping candidates |
 | Model response | JSON object, at most 32,000 characters; duplicate keys/nonfinite JSON rejected |
-| Speech request | One attempt; 5-second connect / 60-second read timeout; 4,500 output tokens |
+| Speech request | Strict JSON schema when supported, JSON-object/prompt compatibility fallback, and one JSON/evidence correction; 5-second connect / 60-second read timeout (180 seconds for reasoning models); normally 4,500 output tokens |
 | Analysis budget | 20 minutes, checked before each provider request; not a forced cancellation of an in-flight call |
 
 Character budgets concern the serialized evidence/context portion, not token
 counts or all prompt overhead. Smaller-context models may need shorter sources.
+Groq connections, including custom profiles using its API URL, use smaller
+4,500-character speech windows, 2,000 output tokens and 8,000-character critic
+batches. All windows still cover the source. Bounded retries honor short
+provider rate-limit cooldowns from headers or the error body.
+Known reasoning models use compact full-coverage windows with up to three scout
+proposals and an 8,192-token completion budget outside Groq. Reasoning tokens and
+final JSON share that budget. A token-limit finish permits one larger completion
+attempt, bounded to 16,384 tokens, using the same connection. Truncated responses
+are never parsed as complete JSON. Groq Qwen uses its supported `none` effort;
+GPT-OSS and other recognized reasoning models use `low`, with compatibility
+fallback when a gateway rejects that parameter. Markdown fences and closed
+`<think>` wrappers may surround a complete transcript response; ambiguous,
+duplicate-key, nonfinite, and incomplete JSON remain invalid.
 Opening/closing quote checks preserve punctuation/symbols: `C++`, `C#`, and `10%`
 are not interchangeable. Quote presence and valid boundaries do not alone prove
 semantic completeness; review the resulting audio/video.
 
-## Visual selection is different
+## Combined audio-and-visual selection
 
 Visual analysis samples **8–12 stills**, normally ten, at actual source times.
-JPEGs are bounded to 768px maximum edge, 256KiB each, and 2MiB total. No audio is
-sent and continuous action between samples is not observed.
+JPEGs are bounded to 768px maximum edge, 256KiB each, and 2MiB total. Raw audio
+and the full video are never sent. When speech is available, the final vision
+request receives the transcript scout/critic's verified candidates and combines
+their actual spoken setup/payoff with the sampled frames. It may reject or
+rescore those candidates but cannot invent new time ranges.
 
-The visual model uses the same audience policy and rubric in **one recommendation
-pass**, not the speech scout/critic flow. It returns an `evidenceFrame` index and
-visible description. Code verifies a real sampled time inside the proposed
-interval, computes the score locally, and applies gates/deduplication. Sparse
-frame evidence supports only approximate timing; inspect the full clip for setup
-and payoff. Music or visual energy does not establish a spoken takeaway.
+The model returns an `evidenceFrame` index and visible description. Code
+recomputes the score locally, applies gates/deduplication, and preserves the
+verified transcript evidence for each accepted clip. Sparse frame evidence
+supports only approximate visual context; inspect the full clip for motion,
+music, and final setup/payoff.
 
-Caption suggestions are disabled without usable speech context. Models with
-known text-only capability fail clearly rather than pretending to inspect images.
-The internal service has an explicit metadata-only fallback; normal UI visual
-requests require an image-capable model.
+Caption suggestions are disabled without usable speech context. Automatic
+analysis and recommendations retain verified speech decisions when a selected
+model is text-only, including DeepSeek V4 text checkpoints and GPT-OSS. These
+results use `analysisBasis: "audio-transcript"`, neutral source framing, and an
+explicit notice that frames were not inspected. Video without speech still
+requires an image-capable connection. Explicit `visual` calls retain their
+capability-error behavior; the internal service also has a metadata-only fallback.
 
 ## Persisted explanations
 

@@ -108,19 +108,70 @@ def analyze_transcript(transcript_text: str, duration: float, provider: str = No
         if 'api_key' not in connection:
             connection['api_key'] = os.environ.get(
                 'CUSTOM_API_KEY' if provider == 'custom' else config.get('env_key') or '', '')
-        def call_model(prompt, max_tokens):
-            options = {'profile': connection, 'retries': 1, 'timeout': (5, 60), 'max_tokens': max_tokens}
-            try:
-                text = (call_anthropic(prompt, **options) if provider == 'claude'
-                        else call_openai_compatible(prompt, provider, **options))
-            except Exception:
-                # Provider failures can echo the entire source, request or arbitrary key.
-                raise RuntimeError('Editorial provider request failed. Check the model, connection and quota.') from None
+        strict_schema_rejected = False
+
+        def call_model(prompt, max_tokens, response_format=None):
+            nonlocal strict_schema_rejected
+            options = {'profile': connection, 'retries': 2,
+                       'timeout': analysis_timeout(connection['model']), 'max_tokens': max_tokens}
+            formats = [None]
+            if provider != 'claude' and response_format is not None:
+                json_object = {'type': 'json_object'}
+                formats = [json_object] if strict_schema_rejected else [response_format, json_object]
+            text = None
+            for index, selected_format in enumerate(formats):
+                try:
+                    if provider == 'claude':
+                        text = call_anthropic(prompt, **options)
+                    else:
+                        text = call_openai_compatible(prompt, provider,
+                                                      response_format=selected_format,
+                                                      compact_reasoning=True, **options)
+                    break
+                except ProviderRequestError as exc:
+                    # A number of OpenAI-compatible gateways return a generic
+                    # 400/422 when a model does not implement json_schema. Do
+                    # not make the wording of that gateway error determine
+                    # whether an otherwise usable model can be tried in the
+                    # simpler JSON-object mode.
+                    format_error = exc.status_code in (400, 415, 422, 501)
+                    if (response_format is not None and provider != 'claude' and index == 0
+                            and not strict_schema_rejected and format_error):
+                        strict_schema_rejected = True
+                        continue
+                    # Provider failures can echo the entire source, request or arbitrary key.
+                    raise AnalysisProviderError(provider_failure_message(exc, provider)) from None
+                except AnalysisProviderError:
+                    raise
+                except Exception:
+                    # Provider failures can echo the entire source, request or arbitrary key.
+                    raise RuntimeError('Editorial provider request failed. Check the model, connection and quota.') from None
             key = connection.get('api_key')
-            if key and key in json.dumps(parse_model_object(text), ensure_ascii=False):
+            if key and key in text:
                 raise ValueError('Editorial response contained private connection data')
+            if key:
+                try:
+                    value = parse_model_object(text)
+                except ValueError:
+                    pass  # The bounded JSON correction owns invalid responses.
+                else:
+                    if key in json.dumps(value, ensure_ascii=False):
+                        raise ValueError('Editorial response contained private connection data')
             return text
-        return analyze_timed_transcript(transcript_data, duration, brief, audience_brief, call_model)
+        # Groq's low-quota profiles can reject a request before generation when
+        # prompt + maximum output tokens exceed the account's per-request token
+        # budget. Custom profiles on the Groq endpoint need the same sizing.
+        # Smaller overlapping windows still cover the complete source.
+        groq_connection = provider == 'groq' or urlparse(connection['base_url']).hostname == 'api.groq.com'
+        budget = {'window_chars': 4500, 'response_tokens': 2000,
+                  'scout_limit': 4, 'review_chars': 8000} if groq_connection else {}
+        if is_reasoning_model(connection['model']):
+            # Scout and critic responses are deliberately short JSON documents.
+            # Compact requests avoid gateway timeouts on long sources while
+            # still covering the complete transcript.
+            budget.update(window_chars=6000, response_tokens=3000,
+                          scout_limit=3, review_chars=8000)
+        return analyze_timed_transcript(transcript_data, duration, brief, audience_brief, call_model, **budget)
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(
         duration=duration,
         transcript=transcript_text
@@ -157,14 +208,59 @@ def provider_model(provider, profile=None):
 class ProviderRequestError(RuntimeError):
     """An HTTP failure with its status available to capability-aware callers."""
 
-    def __init__(self, message, status_code):
+    def __init__(self, message, status_code, reason=None):
         super().__init__(message)
         self.status_code = status_code
+        self.reason = reason
+
+
+class AnalysisProviderError(RuntimeError):
+    """A safe, actionable message generated locally, never a provider echo."""
+
+
+class ProviderOutputError(AnalysisProviderError):
+    """A locally diagnosed completion failure, distinct from HTTP/quota errors."""
+
+
+def is_reasoning_model(model):
+    name = (model or '').lower().split('/')[-1].split(':')[0]
+    return name.startswith(('deepseek-reasoner', 'deepseek-r1', 'deepseek-v4',
+                            'deepseek-flash', 'deepseek-pro', 'qwen3', 'qwq',
+                            'gpt-oss', 'gpt-5', 'o1', 'o3', 'o4'))
+
+
+def analysis_timeout(model):
+    return (5, 180) if is_reasoning_model(model) else (5, 60)
+
+
+def provider_failure_message(error, provider):
+    status = error.status_code
+    advice = {
+        400: 'The selected model rejected the analysis request. Check its model ID and supported request format.',
+        401: 'Authentication failed. Check the API key on the active analysis profile in Settings.',
+        402: 'The active provider account has no available tokens or credits. Check its balance.',
+        403: 'The active analysis profile does not have access to this model.',
+        404: 'The configured model or API endpoint was not found. Check the active profile in Settings.',
+        413: 'The provider rejected the analysis size. Use a model with a larger context window or a shorter source.',
+        429: 'The provider rate limit or quota was reached. Wait before retrying or check your provider quota.',
+        524: 'The provider gateway timed out waiting for the model. Retry with a faster model or a shorter source.',
+    }.get(status)
+    if advice is None:
+        if getattr(error, 'reason', None) == 'timeout':
+            advice = 'The provider timed out. Try again or use a faster model.'
+        elif getattr(error, 'reason', None) == 'connection':
+            advice = 'Could not connect to the provider. Check the active profile URL and network connection.'
+        elif status and status >= 500:
+            advice = 'The provider is temporarily unavailable. Retry when the service recovers.'
+        else:
+            advice = 'The provider rejected the request. Check the active model and connection in Settings.'
+    code = f' (HTTP {status})' if status else ''
+    return f'{provider}: analysis provider request failed{code}. {advice}'
 
 
 def call_openai_compatible(prompt: str | list, provider: str, retries: int = 3,
                            profile: dict = None, timeout=(10, 120), max_tokens=None,
-                           response_format=None) -> str:
+                           response_format=None, compact_reasoning=False) -> str:
     """Call an OpenAI-compatible API with text or multimodal content parts.
 
     ``response_format`` can supply a strict JSON schema. Existing text callers
@@ -211,16 +307,73 @@ def call_openai_compatible(prompt: str | list, provider: str, retries: int = 3,
 
     if max_tokens is not None:
         body['max_tokens'] = max_tokens
-    data = _post_json(provider, endpoint, headers, body, retries, timeout=timeout)
-    try:
-        message = data['choices'][0]['message']
-        content = message.get('content')
-    except (KeyError, IndexError, TypeError, AttributeError) as exc:
-        raise RuntimeError(f'{provider}: invalid response (missing message content)') from exc
-    if not isinstance(content, str) or not content.strip():
-        reason = message.get('refusal') or 'empty or non-text message content'
-        raise RuntimeError(f'{provider}: {reason}')
-    return content
+    reasoning = is_reasoning_model(model)
+    groq_connection = parsed_url.hostname == 'api.groq.com' or provider == 'groq'
+    if reasoning:
+        # Keep editorial decisions concise while reserving room for the answer.
+        # Groq Qwen explicitly supports none; GPT-OSS requires low instead.
+        name = model.lower().split('/')[-1]
+        body['reasoning_effort'] = 'none' if groq_connection and name.startswith('qwen3') else 'low'
+        if not groq_connection and max_tokens is not None:
+            # Direct callers retain the larger reasoning reserve. Editorial
+            # scout/critic calls only need concise JSON and opt into a smaller
+            # completion budget to avoid upstream gateway timeouts.
+            body['max_tokens'] = (max(2048, max_tokens) if compact_reasoning
+                                  else max(8192, max_tokens))
+        timeout = (timeout[0], max(timeout[1], 180))
+    # Gateways vary even when they implement the same chat endpoint. Retry only
+    # rejected format/parameter capabilities, keeping model and credentials fixed.
+    def send():
+        for _ in range(5):
+            try:
+                return _post_json(provider, endpoint, headers, dict(body), retries, timeout=timeout)
+            except ProviderRequestError as exc:
+                if exc.status_code not in (400, 415, 422, 501):
+                    raise
+                detail = str(exc).lower()
+                if 'reasoning_effort' in detail and 'reasoning_effort' in body:
+                    body.pop('reasoning_effort')
+                elif 'temperature' in detail and 'temperature' in body:
+                    body.pop('temperature')
+                elif 'max_tokens' in detail and 'max_tokens' in body:
+                    body['max_completion_tokens'] = body.pop('max_tokens')
+                elif body.get('response_format', {}).get('type') == 'json_object' and not any(
+                        word in detail for word in ('image', 'vision', 'multimodal')):
+                    body.pop('response_format')
+                else:
+                    raise
+        raise AnalysisProviderError('The model rejected the supported request formats. Check the active analysis profile.')
+
+    for attempt in range(2):
+        data = send()
+        try:
+            choice = data['choices'][0]
+            message = choice['message']
+            content = message.get('content')
+        except (KeyError, IndexError, TypeError, AttributeError):
+            raise RuntimeError(f'{provider}: invalid response (missing message content)') from None
+        if choice.get('finish_reason') in ('length', 'max_tokens'):
+            # Do not feed truncated JSON (or reasoning-only output) into the
+            # editorial parser and repeat the same undersized request there.
+            token_field = 'max_completion_tokens' if 'max_completion_tokens' in body else 'max_tokens'
+            current = body.get(token_field) or 4096
+            expanded = min(16384, max(8192, current * 2))
+            if attempt == 0 and expanded > current:
+                body[token_field] = expanded
+                timeout = (timeout[0], max(timeout[1], 180))
+                continue
+            raise ProviderOutputError(f'{provider}: the model exhausted its output token budget before '
+                                      'returning a complete answer. Reasoning tokens count toward this limit.') from None
+        if isinstance(content, list):
+            content = ''.join(part['text'] for part in content
+                              if isinstance(part, dict) and part.get('type') in ('text', 'output_text')
+                              and isinstance(part.get('text'), str))
+        if not isinstance(content, str) or not content.strip():
+            if not message.get('refusal') and (message.get('reasoning') or message.get('reasoning_content')):
+                raise ProviderOutputError(f'{provider}: the model returned reasoning without a final answer. '
+                                          'Its completion budget must include both reasoning and JSON output.') from None
+            raise RuntimeError(f'{provider}: empty, refused or non-text message content') from None
+        return content
 
 
 def call_anthropic(prompt: str, profile: dict = None, retries=3,
@@ -256,14 +409,37 @@ def call_anthropic(prompt: str, profile: dict = None, retries=3,
     return text
 
 
-def _error_detail(payload):
+def _error_detail(payload, max_length=240):
     if isinstance(payload, dict):
         error = payload.get('error') or payload.get('message')
         if isinstance(error, dict):
             error = error.get('message') or error.get('type')
         if error:
-            return sanitize_provider_error(error)
+            return sanitize_provider_error(error, max_length=max_length)
     return ''
+
+
+def _retry_delay(response, attempt):
+    """Honor bounded cooldowns from headers or a gateway's rate-limit message."""
+    try:
+        seconds = float(response.headers.get('Retry-After', ''))
+        if math.isfinite(seconds) and 0 < seconds <= 120:
+            return seconds
+    except (TypeError, ValueError):
+        pass
+    try:
+        # The cooldown often follows a long model/organization/quota prefix.
+        # Parse it before the short display-message limit would remove it.
+        detail = _error_detail(response.json(), max_length=4000).lower()
+    except ValueError:
+        detail = ''
+    hint = re.search(r'try again in\s+((?:\d+(?:\.\d+)?\s*(?:ms|s|m)\s*)+)', detail)
+    if hint:
+        seconds = sum(float(number) * {'ms': .001, 's': 1, 'm': 60}[unit]
+                      for number, unit in re.findall(r'(\d+(?:\.\d+)?)\s*(ms|s|m)', hint[1]))
+        if 0 < seconds <= 120:
+            return seconds + .25
+    return 2 ** attempt
 
 
 def _post_json(provider, endpoint, headers, body, retries=3, timeout=(10, 120)):
@@ -276,9 +452,16 @@ def _post_json(provider, endpoint, headers, body, retries=3, timeout=(10, 120)):
             response.raise_for_status()
         except requests.HTTPError as exc:
             status = response.status_code
-            if status in (408, 429) or status >= 500:
+            # Cloudflare 524 means the upstream gateway already waited for the
+            # model and timed out. Repeating the same expensive request only
+            # makes long editorial jobs appear stuck; let the caller surface a
+            # retryable model/source error immediately.
+            if status in (408, 429) or (status >= 500 and status != 524):
                 if attempt < retries - 1:
-                    time.sleep(2 ** attempt)
+                    # Speech scouting and review may make several consecutive
+                    # requests. Respect a provider's short rate-limit cooldown
+                    # instead of immediately failing the next editorial phase.
+                    time.sleep(_retry_delay(response, attempt))
                     continue
             try:
                 detail = _error_detail(response.json())
@@ -290,7 +473,9 @@ def _post_json(provider, endpoint, headers, body, retries=3, timeout=(10, 120)):
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue
-            raise RuntimeError(f'{provider}: request failed: {sanitize_provider_error(exc)}') from exc
+            reason = 'timeout' if isinstance(exc, requests.Timeout) else 'connection'
+            raise ProviderRequestError(f'{provider}: request failed: {sanitize_provider_error(exc)}', None,
+                                       reason=reason) from exc
         except requests.RequestException as exc:
             raise RuntimeError(f'{provider}: request failed: {sanitize_provider_error(exc)}') from exc
         try:

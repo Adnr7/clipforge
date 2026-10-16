@@ -54,8 +54,10 @@ and `project.visualAnalysis` are parsed objects. See [audience metadata](audienc
 
 Transcription mode is `cloud` or `whisper` (`local` aliases `whisper`), selected
 from the profile/default when omitted. An explicit mode must match an explicit
-or active transcription profile. Analysis mode is `transcript` (default) or
-`visual`; **`auto` is a frontend decision, not an accepted backend mode**.
+or active transcription profile. Analysis mode is `auto` (the normal UI path),
+`transcript`, or `visual`. Omitted mode retains the legacy `transcript` default.
+`auto` combines the full timed audio transcript with sampled video evidence
+when both are available and uses verified speech when the connection is text-only.
 
 When `profileId` is supplied it selects that LLM profile. Otherwise, omitting
 `provider` uses the active profile/default. Supplying `provider` explicitly uses
@@ -65,7 +67,7 @@ and a capable model.
 
 ```json
 {
-  "mode": "transcript",
+  "mode": "auto",
   "brief": "Prefer a practical, complete example.",
   "audienceBrief": {
     "audience": "First-time founders",
@@ -89,7 +91,7 @@ sequenceDiagram
   participant Worker
   Client->>API: POST analyze with audienceBrief
   API-->>Client: 202 started + model
-  API->>Worker: Timed scout/critic or visual analysis
+  API->>Worker: Timed scout/critic + sampled-frame editorial review
   loop Until stage is done or error
     Client->>API: GET project detail
     API-->>Client: jobs.analysis + persisted artifacts
@@ -190,19 +192,18 @@ Filenames: `clipforge-clip-<rank>-<artifact-id>.mp4` and
 
 | Method | Path | Payload / result |
 | --- | --- | --- |
-| POST | `/projects/<id>/ai-edit/chat` | `{message,messages?,brief?,audienceBrief?}` → `{message,model,basis}` |
-| POST | `/projects/<id>/ai-edit/recommendations` | `{brief?,audienceBrief?}` → visual recommendation |
+| POST | `/projects/<id>/ai-edit/recommendations` | `{brief?,audienceBrief?}` → audio-and-visual recommendation |
 
-Chat messages are at most 2,000 characters; history is at most 20 exact
-`{role,text}` entries with `role: user | guide | model`, each at most 2,000
-characters. Context includes allowlisted technical metadata and up to 12,000
-characters of optional transcript, not source paths or other projects.
-
-Advice routes use the active analysis connection. Recommendations include
+The recommendation route uses the active analysis connection. Recommendations include
 framing, partial caption/filter suggestions, audience, candidates/evidence,
-sample timestamps, source metadata, context notice, and actual model. Neither
-advice endpoint persists candidates or starts renders. The frontend has a
-separate reviewed orchestration flow; [AI Edit integration](ai-edit-mode.md).
+sample timestamps, source metadata, audio/visual context notice, and actual
+model. The advice endpoint does not persist candidates or start renders. The
+frontend has a separate reviewed orchestration flow;
+[AI Edit integration](ai-edit-mode.md).
+Visual recommendations include a versioned local brief fingerprint when they
+are produced by the current contract. Persisted records without provenance are
+legacy reference data and are not eligible to supply reviewed AI settings until
+a fresh recommendation is requested.
 
 ## Providers and settings
 
@@ -239,7 +240,7 @@ write. Saved defaults persist to `DATA_DIR/.env`.
 A completed YouTube download supplies a path for project creation; it does not
 create the project itself. Download jobs are in-memory and do not survive restart.
 Ollama must already be running on its default local port. License metadata is
-informational.
+ informational.
 
 ## Where to verify a contract
 

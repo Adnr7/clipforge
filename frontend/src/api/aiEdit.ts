@@ -1,6 +1,7 @@
 import { api, type AudienceBrief, type Candidate, type CaptionSettings, type ClipSelection, type JobStatus, type OutputSettings, type ProjectDetail, type RenderOptions, type VideoFilters } from './client'
 import { audienceFromBrief } from './audience'
 import { isActiveJob, isFailedJob } from './jobs'
+import { fallbackRenderContract } from './renderDefaults'
 
 export interface AiEditBrief {
   audience: string
@@ -14,31 +15,21 @@ export interface AiEditBrief {
   analysisMode: 'auto' | 'visual' | 'transcript'
 }
 
-export interface AiEditMessage {
-  role: 'user' | 'guide' | 'model'
-  text: string
-  model?: string
-  basis?: 'metadata' | 'transcript'
-}
-
-export interface AiEditChatReply {
-  message: string
-  model: string
-  basis: 'metadata' | 'transcript'
-}
+type EditorialAssessment = { audienceFit: number; hook: number; payoff: number; clarity: number; shareability: number }
 
 export interface VisualRecommendation {
   aspectRatio: { mode: 'preserve' | 'crop' | 'pad'; ratio: 'source' | '9:16' | '16:9' | '1:1' | '4:5' }
   videoFilters: Partial<VideoFilters>
   captionSettings: Partial<CaptionSettings>
-  candidates: { start: number; end: number; score: number; hook: string; rationale: string; selection?: ClipSelection }[]
-  audience?: string
+  candidates: { start: number; end: number; score: number; hook: string; rationale: string; topic?: string; audienceReason?: string; assessment?: EditorialAssessment; evidenceFrame?: number; evidenceDescription?: string; selection?: ClipSelection }[]
+  audience: string
   rationale: string
-  analysisBasis: 'sampled-frames'
+  analysisBasis: 'sampled-frames' | 'audio-and-sampled-frames' | 'audio-transcript'
   source: { width: number; height: number; durationSeconds: number; hasVideo: boolean; hasAudio: boolean }
   sampledFrameTimes: number[]
   contextNotice: string
   model: string
+  provenance?: { version: 1; briefFingerprint: string }
 }
 
 const platforms = { shorts: 'YouTube Shorts', reels: 'Instagram Reels', tiktok: 'TikTok' }
@@ -46,7 +37,7 @@ const lengths = { any: 'Any natural length', '15-30': '15–30 seconds', '30-60'
 
 export const aiBriefFieldLimits = { audience: 1000, goal: 1000, notes: 2000 } as const
 
-/** One brief is shared by chat, recommendations and clip analysis. */
+/** One brief is shared by recommendations and clip analysis. */
 export function formatAiEditBrief(brief: AiEditBrief): string {
   return [`Audience: ${brief.audience}`, `Goal: ${brief.goal}`, `Topics, tone & things to avoid: ${brief.notes}`,
     `Platform: ${platforms[brief.platform]}`, `Clip count: up to ${brief.clipCount}`, `Preferred length: ${lengths[brief.length]}`,
@@ -81,39 +72,139 @@ async function aiEditRequest<T>(projectId: string, route: string, body: unknown,
 }
 
 export const aiEditApi = {
-  chat: async (projectId: string, message: string, messages: AiEditMessage[], brief: AiEditBrief, signal?: AbortSignal): Promise<AiEditChatReply> => {
-    const value = await aiEditRequest<AiEditChatReply>(projectId, 'ai-edit/chat', {
-      message, messages: messages.map(({ role, text }) => ({ role, text })), brief: formatAiEditBrief(brief),
-      audienceBrief: audienceFromBrief(brief),
-    }, signal)
-    if (!value || typeof value.message !== 'string' || !value.message.trim() || typeof value.model !== 'string'
-      || !['metadata', 'transcript'].includes(value.basis)) throw new Error('The chat endpoint returned an incomplete model reply. Please try again.')
-    return value
-  },
   recommendations: async (projectId: string, brief: AiEditBrief, signal?: AbortSignal): Promise<VisualRecommendation> => {
+    const controller = signal || new AbortController().signal
+    let detail = await readProject(projectId, controller)
+    // Audio context is required for a complete recommendation even when the
+    // user has captions disabled. An existing silent transcript is not retried.
+    if (!detail.transcript && sourceHasAudio(detail) !== false) {
+      try {
+        await api.transcribe(projectId, undefined, controller)
+        await waitForProject(projectId, controller, (value) => {
+          if (isFailedJob(value.jobs?.transcription.status)) {
+            if (sourceHasVideo(value) === false) throw new Error(`Transcription failed: ${value.jobs?.transcription.error || 'Try again.'}`)
+            return true
+          }
+          return value.jobs?.transcription.status === 'done'
+        })
+      } catch (error) {
+        controller.throwIfAborted()
+        detail = await readProject(projectId, controller)
+        if (sourceHasVideo(detail) === false || isActiveJob(detail.jobs?.transcription.status)) throw error
+      }
+    }
     const value = await aiEditRequest<VisualRecommendation>(projectId, 'ai-edit/recommendations', {
       brief: formatAiEditBrief(brief), audienceBrief: audienceFromBrief(brief),
     }, signal)
     if (!isVisualRecommendation(value)) throw new Error('The recommendation endpoint returned an incomplete visual response. Please try again.')
     return value
   },
-  analyze: (projectId: string, options: { mode: 'visual' | 'transcript'; brief: string; provider?: string; audienceBrief?: AudienceBrief }, signal?: AbortSignal) =>
-    aiEditRequest<{ status: string; model?: string }>(projectId, 'analyze', options, signal),
+  analyze: async (projectId: string, options: { mode: 'auto' | 'visual' | 'transcript'; brief: string; provider?: string; audienceBrief?: AudienceBrief }, signal?: AbortSignal) => {
+    const value = await aiEditRequest<{ status: string; model?: string }>(projectId, 'analyze', options, signal)
+    if (!isPlainObject(value) || value.status !== 'started' || (value.model !== undefined && (typeof value.model !== 'string' || value.model.length > 200))) {
+      throw new Error('The analysis endpoint returned an incomplete job response. Please try again.')
+    }
+    return value
+  },
 }
 
 function isVisualRecommendation(value: unknown): value is VisualRecommendation {
-  if (!value || typeof value !== 'object') return false
-  const item = value as VisualRecommendation
-  return item.analysisBasis === 'sampled-frames' && typeof item.model === 'string' && typeof item.rationale === 'string'
-    && !!item.source && typeof item.source.hasVideo === 'boolean' && typeof item.source.hasAudio === 'boolean'
-    && !!item.aspectRatio && ['preserve', 'crop', 'pad'].includes(item.aspectRatio.mode)
-    && ['source', '9:16', '16:9', '1:1', '4:5'].includes(item.aspectRatio.ratio)
-    && !!item.videoFilters && !!item.captionSettings && Array.isArray(item.candidates) && Array.isArray(item.sampledFrameTimes)
+  if (!isPlainObject(value)) return false
+  const item = value as unknown as VisualRecommendation
+  const source = item.source
+  const aspect = item.aspectRatio
+  if (!['sampled-frames', 'audio-and-sampled-frames', 'audio-transcript'].includes(item.analysisBasis) || !boundedText(item.model, 200) || !boundedText(item.rationale, 1000)
+      || !boundedText(item.contextNotice, 1000) || !boundedText(item.audience, 1000) || !isPlainObject(source)
+      || typeof source.hasVideo !== 'boolean' || typeof source.hasAudio !== 'boolean'
+      || !finiteNumber(source.durationSeconds, 0) || (source.hasVideo && (!finiteNumber(source.width, 1) || !finiteNumber(source.height, 1)))
+      || (!source.hasVideo && (!finiteNumber(source.width, 0) || !finiteNumber(source.height, 0)))) return false
+  if (!isPlainObject(aspect) || !['preserve', 'crop', 'pad'].includes(aspect.mode)
+      || !['source', '9:16', '16:9', '1:1', '4:5'].includes(aspect.ratio)
+      || ((aspect.mode === 'preserve') !== (aspect.ratio === 'source'))) return false
+  if (!isVisualFilters(item.videoFilters) || !isCaptionSuggestion(item.captionSettings)) return false
+  if (!Array.isArray(item.sampledFrameTimes)
+      || (item.analysisBasis === 'audio-transcript' ? item.sampledFrameTimes.length !== 0 : item.sampledFrameTimes.length < 8 || item.sampledFrameTimes.length > 12)
+      || item.sampledFrameTimes.some((time) => !finiteNumber(time, 0) || time >= source.durationSeconds)) return false
+  if (!Array.isArray(item.candidates) || item.candidates.length > 8 || item.candidates.some((candidate) => {
+    if (!isPlainObject(candidate) || !finiteNumber(candidate.start, 0) || !finiteNumber(candidate.end, 0)
+        || candidate.end <= candidate.start || candidate.end > source.durationSeconds || candidate.end - candidate.start > 60
+        || (source.durationSeconds >= 15 && candidate.end - candidate.start < 15) || !finiteNumber(candidate.score, 0, 100)
+        || !boundedText(candidate.hook, 200) || !boundedText(candidate.rationale, 1000)) return true
+    if (item.analysisBasis === 'audio-transcript') return !isVisualSelection(candidate.selection)
+      || candidate.selection.evidence.basis !== 'transcript'
+    const frame = candidate.evidenceFrame
+    if (!boundedText(candidate.topic, 100) || !boundedText(candidate.audienceReason, 300)
+        || !isAssessment(candidate.assessment) || typeof frame !== 'number' || !Number.isInteger(frame)
+        || frame < 0 || frame >= item.sampledFrameTimes.length
+        || (item.analysisBasis === 'sampled-frames' && (item.sampledFrameTimes[frame] < candidate.start
+          || item.sampledFrameTimes[frame] >= candidate.end))
+        || !boundedText(candidate.evidenceDescription, 300)) return true
+    return candidate.selection !== undefined && !isVisualSelection(candidate.selection)
+  })) return false
+  return item.provenance === undefined || (isPlainObject(item.provenance)
+    && item.provenance.version === 1 && /^fnv1a64-v1:[0-9a-f]{16}$/.test(item.provenance.briefFingerprint))
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function boundedText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= maximum
+}
+
+function finiteNumber(value: unknown, minimum: number, maximum = Number.POSITIVE_INFINITY): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+}
+
+function isAssessment(value: unknown): value is EditorialAssessment {
+  return isPlainObject(value) && Object.keys(value).length === 5
+    && ['audienceFit', 'hook', 'payoff', 'clarity', 'shareability'].every((key) => finiteNumber(value[key], 0, 5))
+}
+
+function isVisualSelection(value: unknown): value is ClipSelection {
+  if (!isPlainObject(value) || value.method !== 'audience-first-v1' || typeof value.audienceInferred !== 'boolean'
+      || !boundedText(value.audience, 1000) || !boundedText(value.audienceReason, 300) || !boundedText(value.topic, 100)
+      || !isAssessment(value.assessment) || !isPlainObject(value.evidence)) return false
+  if (value.evidence.basis === 'sampled-frames') return finiteNumber(value.evidence.timeSeconds, 0)
+    && boundedText(value.evidence.description, 300)
+  return value.evidence.basis === 'transcript' && boundedText(value.evidence.openingQuote, 240)
+    && boundedText(value.evidence.closingQuote, 240)
+}
+
+function isVisualFilters(value: unknown): value is Partial<VideoFilters> {
+  if (!isPlainObject(value)) return false
+  const ranges = fallbackRenderContract.videoFilters.ranges
+  return Object.entries(value).every(([key, number]) => key in ranges && finiteNumber(number, ranges[key as keyof VideoFilters].min, ranges[key as keyof VideoFilters].max))
+}
+
+function isCaptionSuggestion(value: unknown): value is Partial<CaptionSettings> {
+  if (!isPlainObject(value)) return false
+  const allowed = new Set(['enabled', 'preset', 'placement'])
+  if (Object.keys(value).some((key) => !allowed.has(key))) return false
+  return (value.enabled === undefined || typeof value.enabled === 'boolean')
+    && (value.preset === undefined || fallbackRenderContract.caption.presets.some((preset) => preset.id === value.preset))
+    && (value.placement === undefined || fallbackRenderContract.caption.placements.includes(value.placement))
+}
+
+export function editingBriefFingerprint(brief: AiEditBrief): string {
+  const canonical = JSON.stringify({ brief: formatAiEditBrief(brief), audienceBrief: audienceFromBrief(brief) })
+  let value = 0xCBF29CE484222325n
+  for (const byte of new TextEncoder().encode(canonical)) {
+    value ^= BigInt(byte)
+    value = BigInt.asUintN(64, value * 0x100000001B3n)
+  }
+  return `fnv1a64-v1:${value.toString(16).padStart(16, '0')}`
+}
+
+export function visualRecommendationIsCurrent(recommendation: VisualRecommendation, brief: AiEditBrief): boolean {
+  return recommendation.provenance?.version === 1
+    && recommendation.provenance.briefFingerprint === editingBriefFingerprint(brief)
 }
 
 export function projectVisualRecommendation(detail: ProjectDetail): VisualRecommendation | null {
   // Kept here so the shared client can be evolved independently by the aspect owner.
-  const value = (detail.project as ProjectDetail['project'] & { visualAnalysis?: unknown }).visualAnalysis
+  const value = detail.project.visualAnalysis
   return isVisualRecommendation(value) ? value : null
 }
 
@@ -193,24 +284,19 @@ function sourceHasAudio(detail: ProjectDetail): boolean | undefined {
   catch { return undefined }
 }
 
-function sourceHasVideo(detail: ProjectDetail): boolean | undefined {
+export function sourceHasVideo(detail: ProjectDetail): boolean | undefined {
   const visual = projectVisualRecommendation(detail)
   if (visual) return visual.source.hasVideo
   try { return JSON.parse(detail.project.source_metadata_json || 'null')?.has_video }
   catch { return undefined }
 }
 
-function resolveAnalysisMode(brief: AiEditBrief, detail: ProjectDetail): 'transcript' | 'visual' {
-  if (brief.analysisMode !== 'auto') return brief.analysisMode
-  return transcriptHasSpeech(detail) || sourceHasVideo(detail) === false ? 'transcript' : 'visual'
-}
-
 export function createAiEditPlan(detail: ProjectDetail, brief: AiEditBrief, renderOptions: RenderOptions, recommendation: VisualRecommendation | null = null): AiEditPlan {
   const analyze = !detail.candidates.length || !brief.reuseCandidates
-  const effectiveBrief = { ...brief, analysisMode: analyze && sourceHasVideo(detail) === false ? 'transcript' as const : brief.analysisMode }
+  const effectiveBrief = { ...brief, analysisMode: 'auto' as const }
   return {
     projectId: detail.project.id, basis: projectPlanBasis(detail), brief: effectiveBrief,
-    transcribe: (brief.captions || (analyze && effectiveBrief.analysisMode === 'transcript')) && !detail.transcript && sourceHasAudio(detail) !== false, analyze,
+    transcribe: (brief.captions || analyze) && !detail.transcript && sourceHasAudio(detail) !== false, analyze,
     replacesCandidates: analyze && detail.candidates.length > 0,
     candidateIds: analyze ? [] : chooseAiCandidates(detail, brief).map((candidate) => candidate.id),
     renderOptions: structuredClone(renderOptions),
@@ -280,7 +366,6 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
     if (isActiveJob(detail.jobs?.transcription.status) || isActiveJob(detail.jobs?.analysis.status) || detail.clips.some((clip) => isActiveJob(clip.status))) {
       throw new Error('The project has an active job. Wait for it to finish, then review a fresh plan.')
     }
-    let analysisMode = resolveAnalysisMode(plan.brief, detail)
     let renderOptions = structuredClone(plan.renderOptions)
     if (plan.transcribe) {
       report('running', 'Transcribing source audio with your configured transcription provider…')
@@ -290,9 +375,8 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
         detail = await waitForProject(plan.projectId, signal, (value) => jobDone(value.jobs?.transcription, 'Transcription'))
         if (transcriptHasSpeech(detail)) report('done', 'Speech transcript ready for captions and project context.')
         else {
-          if (plan.analyze && sourceHasVideo(detail) === false) throw new Error('No usable speech was found in this audio-only source.')
-          analysisMode = 'visual'
-          report('done', `No speech found. Captions off; ${plan.analyze ? 'continuing with sampled-frame visual analysis.' : 'reusing the reviewed cuts.'}`)
+           if (plan.analyze && sourceHasVideo(detail) === false) throw new Error('No usable speech was found in this audio-only source.')
+           report('done', `No speech found. Captions off; ${plan.analyze ? 'the AI will use visual evidence.' : 'reusing the reviewed cuts.'}`)
         }
       } catch (error) {
         signal.throwIfAborted()
@@ -300,8 +384,7 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
         detail = await readProject(plan.projectId, signal)
         if (isActiveJob(detail.jobs?.transcription.status)) throw error
         if (sourceHasVideo(detail) === false && plan.analyze) throw error
-        analysisMode = 'visual'
-        report('error', `${aiEditError(error)} Captions off; ${plan.analyze ? 'continuing with sampled-frame visual analysis.' : 'reusing the reviewed cuts.'}`)
+        report('error', `${aiEditError(error)} Captions off; ${plan.analyze ? 'the AI will use the available audio/video evidence.' : 'reusing the reviewed cuts.'}`)
       }
     } else report('done', !renderOptions.captionSettings?.enabled ? 'Captions off; transcription skipped.'
       : transcriptHasSpeech(detail) ? 'Reusing the available speech transcript.' : 'No usable speech or audio; captions off. Transcription skipped.')
@@ -311,18 +394,12 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
 
     step = 'analyze'
     if (plan.analyze) {
-      if (plan.brief.analysisMode === 'auto') analysisMode = resolveAnalysisMode(plan.brief, detail)
-      if (analysisMode === 'transcript' && !transcriptHasSpeech(detail)) {
-        if (sourceHasVideo(detail) === false) throw new Error('Transcript analysis needs usable speech. No video frames are available in this audio-only source.')
-        analysisMode = 'visual'
-      }
-      report('running', analysisMode === 'visual' ? 'Your visual model is inspecting sampled video frames with your editing brief…'
-        : 'Your analysis model is ranking transcript moments with your editing brief…')
-      const analysis = await aiEditApi.analyze(plan.projectId, { mode: analysisMode,
+      report('running', 'Your AI is evaluating the full speech transcript and sampled video frames together…')
+      const analysis = await aiEditApi.analyze(plan.projectId, { mode: 'auto',
         brief: formatAiEditBrief(plan.brief), audienceBrief: audienceFromBrief(plan.brief) }, signal)
       await callbacks.refresh()
       detail = await waitForProject(plan.projectId, signal, (value) => jobDone(value.jobs?.analysis, 'Analysis'))
-      const visual = analysisMode === 'visual' ? projectVisualRecommendation(detail) : null
+      const visual = projectVisualRecommendation(detail)
       if (visual) {
         callbacks.recommendation?.(visual)
         if (plan.useRecommendedSettings) {
@@ -331,7 +408,7 @@ export async function runAiEditPlan(plan: AiEditPlan, signal: AbortSignal, callb
           renderOptions.captionSettings = { ...renderOptions.captionSettings, enabled: captions }
         }
       }
-      report('done', `${detail.candidates.length} ${analysisMode === 'visual' ? 'visual' : 'transcript-based'} candidates returned${visual
+      report('done', `${detail.candidates.length} audio + visual candidates returned${visual
         ? ` · ${visual.model} · ${visual.sampledFrameTimes.length} sampled frames. ${visual.contextNotice || ''}` : analysis.model ? ` · ${analysis.model}.` : '.'}`)
     } else report('done', `Reusing ${detail.candidates.length} existing candidates; no replacement requested.`)
 

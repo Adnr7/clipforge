@@ -1,199 +1,88 @@
-# AI Edit: project chat and visual editing
+# AI Edit: combined audio-and-visual editing
 
 [Documentation hub](README.md) · [Audience selection](audience-selection.md) · [API reference](api.md)
 
 ## Workspace integration
 
-`frontend/src/components/AiEditMode.tsx` receives the current project and editor
-settings. Workspace retains its mounted tree when switching Manual / AI Edit, so
-automation and the conversation survive mode switches.
+`frontend/src/components/AiEditMode.tsx` receives the current project, shared
+audience brief, and editor settings. Workspace keeps the component mounted when
+switching Manual / AI Edit, so an approved automation run can continue while
+the user reviews the source or rendered clips.
 
-```tsx
-<AiEditMode
-  detail={detail}
-  active={editMode === 'ai'}
-  busy={processing || rendering || !!pending || selectionBusy || savingControls || controlsOpen || suggestionsLoading}
-  captionSettings={captionSettings}
-  videoFilters={videoFilters}
-  outputSettings={outputSettings}
-  audienceBrief={audienceBrief}
-  onAudienceChange={setAudienceBrief}
-  onBusyChange={setAiBusy}
-  onRefresh={refresh}
-  onSelectionSaved={() => setSelectionOverride(null)}
-  onRenderQueued={(candidateId, clipId) => { /* track this render artifact */ }}
-  onManual={() => setEditMode('manual')}
-  onOpenControls={() => setControlsOpen(true)}
-/>
-```
+The AI Edit brief contains:
 
-**`outputSettings: OutputSettings` is required.** Pass the full current Workspace
-snapshot: `{mode: 'source' | 'manual' | 'ai', aspectRatio, fit: 'contain' | 'crop',
-maxDimension}`. There is no `supportsOutputSettings` prop. Source-preserve is the
-default supplied by Workspace; AI Edit does not impose a portrait crop or infer
-an output ratio from the destination selector.
+- intended audience and viewer takeaway;
+- topics, tone, and exclusions;
+- destination, clip count, preferred length, and caption preference.
 
-`onBusyChange` locks conflicting Manual mutations during the automated pipeline.
-`onRenderQueued` tracks the exact returned artifact ID, including server-reused
-completed renders. `onSelectionSaved` clears Workspace's optimistic selection;
-`onRefresh` reloads project state and returns `Promise<boolean>`. Mount per
-project (or key the component by project ID).
+Changing these fields only updates the project draft. A model request starts
+only when the user asks for a recommendation or approves the automated plan.
 
-**`audienceBrief: AudienceBrief` and `onAudienceChange` are required.** Workspace
-owns shared `{audience,goal,notes}` fields, persists them per project, and passes
-the same values to Manual and AI Edit. Do not maintain a second independent
-audience state in a new component. Field edits are local draft changes, not
-model calls.
+## Recommendation API
 
-## API contracts
+`POST /api/projects/:id/ai-edit/recommendations` accepts `{brief,
+audienceBrief}` and uses the active analysis profile. If a usable transcript is
+available, the server first runs the bounded timed-transcript scout and critic.
+The final image-capable request receives those verified spoken candidates,
+their source text, the editing brief, and timestamped sampled frames. It makes
+one final audio-and-visual decision about the clips, framing, captions, and
+look. The raw audio and full video are never sent to the model endpoint.
 
-AI Edit HTTP functions are in `frontend/src/api/aiEdit.ts`; shared media/render
-requests are in `frontend/src/api/client.ts`:
+If the active connection cannot inspect images, verified transcript analysis
+still supplies clip recommendations and automatic analysis results. The card
+labels that result as audio-transcript evidence and keeps neutral source
+framing. A video-only request reports that the configured model needs image
+capability.
 
-- **Project chat:** `POST /api/projects/:id/ai-edit/chat` with
-  `{message, messages: [{role: 'user' | 'guide' | 'model', text}], brief, audienceBrief}`.
-  `message` is the current turn; `messages` is preceding conversation history.
-  The response is `{message, model, basis: 'metadata' | 'transcript'}`.
-- **Visual recommendation preview:**
-  `POST /api/projects/:id/ai-edit/recommendations` with `{brief, audienceBrief}`. Returns
-  `VisualRecommendation`: `aspectRatio: {mode: 'preserve' | 'crop' | 'pad', ratio}`,
-  partial `videoFilters` and `captionSettings`, suggested `candidates`,
-  `rationale`, `analysisBasis: 'sampled-frames'`, source dimensions/duration and
-  audio/video availability, `sampledFrameTimes`, `contextNotice`, `audience`, and `model`.
-  Each audience-first candidate carries rubric and source-frame evidence in `selection`.
-- **Clip analysis job:** `POST /api/projects/:id/analyze` with
-  `{mode: 'visual' | 'transcript', brief, audienceBrief, provider?, profileId?}`. The runner uses the active
-  configured provider. Successful visual analysis persists its recommendation
-  under `GET /api/projects/:id` → `project.visualAnalysis`, and replaces the
-  candidate records. The runner selects those persisted candidates, rather than
-  trying to render the preview recommendation's raw time ranges.
+The browser creates speech context before requesting a recommendation when
+source audio is available. This also happens with captions off; clip selection
+needs the spoken story independently of caption rendering.
 
-Speech jobs now receive timestamped transcript data for scout/critic selection.
-The backend accepts explicit `visual`/`transcript` only; Auto is resolved by the
-frontend. [Method and metadata](audience-selection.md).
-
-Chat sends a shared formatted brief containing audience, takeaway, notes, all
-destination/count/duration/caption choices, analysis mode, and reuse preference.
-Audience and goal each allow 1,000 characters; notes allow 2,000. Chat,
-recommendations, and both analysis modes share a 5,000-character combined brief
-limit, including the formatted labels and editing options. Overflowing chat
-additions show a correction message and retain the unsent turn and current
-brief. Accepted briefs are passed to the model intact.
-The starter greeting and question labels are local and explicitly identified as
-the **starter guide**. Send calls the project-chat endpoint. Only endpoint
-responses become **Model reply · model-name** entries, with their returned
-context basis. Failures appear as errors and do not generate synthetic replies.
-Chat context is metadata/transcript; sampled-frame context is shown separately
-on the visual recommendation card.
-
-HTTP errors accept JSON `error`, `message`, or string `detail`, handle plain-text
-errors, and convert gateway HTML to a concise status message. Displayed errors
-are plain text and capped at 600 characters. Request signals support stopping
-chat and visual recommendation requests.
+Recommendations include the actual model, audience, rationale, source
+metadata, sampled frame times, context notice, and versioned brief provenance.
+They are previews: they do not mutate candidates or editor settings.
 
 ## Reviewed automation
 
-The default clip-analysis mode is **Auto · speech when available, otherwise
-frames**. Explicit Speech and Video visuals remain available. Auto is resolved
-again after transcription; audio-only sources require speech analysis.
+The normal analysis mode is `auto`:
 
-1. **Optional transcription.** Visual video analysis with captions off does not request transcription.
-   Audio-only sources use speech analysis and need transcription even with captions off.
-   With captions requested and no transcript/audio exclusion, create a speech
-   transcript. Existing speech is reused. Empty speech results or failed
-   transcription on video continue to visual analysis with captions off; the
-   activity timeline reports the actual no-speech/provider result. A monitoring
-   failure does not advance while a transcription job is still active. An
-   existing silent transcript is not repeatedly retranscribed.
-2. **Analyze or reuse.** Fresh audience analysis is the default. Explicit reuse
-   keeps existing candidate rankings and does not retarget them to the new brief.
-   Otherwise queue visual or transcript analysis with both briefs and await completion. If
-   Transcript was chosen but speech is unavailable, use video-frame analysis.
-   Visual recommendations work with music, silent video, and no transcript.
-3. **Select.** Prefer candidates matching the requested duration, then score and
-   rank among approved candidates; select up to the requested limit. Persist the complete selection and
-   await success before rendering.
-4. **Render.** Queue each selected candidate with the reviewed settings snapshot,
-   then track the returned clip IDs until complete. Speech availability is
-   checked before burning captions. Completed and partially successful exports
-   remain previewable/downloadable.
+1. Create timed speech context when audio is available and the plan needs fresh
+   analysis or captions.
+2. Send the full timed transcript through the source-bound scout/critic.
+3. If video is available, inspect sampled frames and let the AI select from the
+   verified audio candidates using both evidence channels. With no speech, use
+   conservative visual selection. With an audio-only source, use the reviewed
+   transcript candidates.
+4. Save the returned candidate selection and wait for that write to succeed.
+5. Queue renders with the reviewed caption, filter, and output snapshot.
 
-### AI settings are an explicit plan choice
+The plan requires explicit approval. Reanalysis of existing candidates also
+requires confirmation because it replaces their selections and rendered
+artifacts. **Use AI recommended settings** is separately opt-in; requesting a
+recommendation never silently changes the project look.
 
-The compact review dialog contains **Use AI recommended settings**, unchecked
-by default. Opening a recommendation or running visual analysis does not apply
-it. Without this choice, render requests retain the full reviewed Workspace
-caption/filter/output snapshot, including a source or manually selected ratio.
+The browser owns sequencing and polling. Stopping automation prevents future
+requests but cannot cancel a server job that was already queued. Failed
+analysis preserves the previous candidates and exposes a retry action.
 
-With this choice, a preview recommendation can be reviewed before starting;
-completed visual analysis can then supply the latest persisted recommendation.
-Both paths merge partial caption/filter choices into the full current settings
-snapshot, retaining font, outline, shadow, background and chunking fields.
-Captions off in the brief and missing speech take precedence over an AI-enabled
-caption suggestion. Framing maps as follows, retaining reviewed `maxDimension`:
+## Connection failures
 
-| Visual recommendation | Render output settings |
-| --- | --- |
-| `preserve` | `mode: source`, `aspectRatio: source`, `fit: contain` |
-| `crop` | `mode: ai`, recommended ratio, `fit: crop` |
-| `pad` | `mode: ai`, recommended ratio, `fit: contain` |
+Provider/model negotiation keeps the selected profile fixed while retrying
+compatible request formats. Unsupported strict JSON schema falls back to JSON
+object mode; supported model, endpoint, and credentials do not change. Errors
+are bounded and actionable, for example authentication, quota, endpoint, model,
+image-capability, or timeout guidance. Provider response bodies, source paths,
+image data, and credentials are not returned to the browser.
 
-The recommendation card shows actual model name, rationale, sample count/times,
-suggested moments, framing and context notice. A fetched recommendation is marked
-stale after brief changes. Last persisted visual analysis remains visible after
-reopening the project. Recommendations do not overwrite saved editor settings.
+## Storage and verification
 
-Reanalysis of existing candidates has the additional destructive acknowledgment
-for replacing candidates, selections and rendered outputs. The plan also
-requires approval of the selection update. Starting verifies the source,
-transcript and candidate snapshot and rejects active jobs or a stale review.
+The shared audience brief is stored per project in local storage. The latest
+recommendation is persisted with the project only after a successful analysis
+job; its provenance fingerprint prevents stale settings from being applied
+after the brief changes.
 
-## Lifecycle and verification
-
-Briefs and the latest 20 conversation entries are saved in project-scoped
-`sessionStorage` under `clipforge.ai-edit.v2.<projectId>`. Version 2 avoids
-relabeling the MVP's simulated replies as connected-model responses. Plans and
-automation are not automatically resumed after a reload.
-
-Shared audience fields additionally persist in `localStorage` under
-`clipforge.audience.v1.<projectId>`; they take precedence over the session draft
-when rendering the form. A saved `selectionMethod: audience-first-v1` marker
-prevents an old draft's default reuse preference silently carrying into the
-audience-first workflow. Older drafts can supply an initial audience fallback.
-
-**Stop automation** or leaving the project aborts browser sequencing and future
-requests. Switching editing modes retains the run. Accepted backend jobs may
-still finish. Project polling has a stage-status fallback for older aggregate
-responses, two transient retries, and a 30-minute monitoring limit.
-
-`frontend/tests/ai-edit.spec.ts` mocks the chat, recommendation, analysis and
-render routes. Coverage includes endpoint-backed replies and complete briefs,
-project isolation/Manual preservation, music/no-transcript visual automation,
-no-speech and failed-transcription fallback, optional transcript mode, reviewed
-ratio pass-through, opt-in latest visual settings, full caption merges, HTML and
-bounded errors, replacement approval, selection/render failures, stop/unmount,
-stale review, saved visual results, legacy status reads, completed artifact reuse,
-and responsive light/dark layouts. These checks exercise frontend integration;
-the mock suite does not invoke a live model or FFmpeg.
-
-Audience coverage verifies shared Manual/AI fields, button-only model requests,
-structured payloads for chat/recommendations/analysis/look suggestions, candidate
-evidence disclosures, and all three themes at desktop/mobile widths.
-
-### Verification
-
-Backend route tests cover project-scoped context, exact active profiles,
-non-mutating advice, visual jobs without speech, bad response rollback, and
-bounded request capacity. Actual model inference is separate from these
-controlled transport tests. See [Contributing](../CONTRIBUTING.md) for the full
-verification workflow.
-
-Run from `frontend/`:
-
-```sh
-npm run build
-npm run lint
-npm run test:e2e -- tests/ai-edit.spec.ts
-```
-
-Normal browser prerequisites are installed with `npx playwright install --with-deps chromium`.
+Backend tests cover transcript evidence, multimodal transport negotiation,
+visual validation, rollback, provider redaction, and profile selection.
+Frontend tests cover the combined recommendation payload, absence of the old
+project-chat surface, reviewed automation, selection/render sequencing, and
+responsive AI Edit layouts.

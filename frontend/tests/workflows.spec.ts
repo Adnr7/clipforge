@@ -34,7 +34,7 @@ type MockState = {
     llmProvider: string; transcriptionMode: 'local' | 'cloud'; whisperModel: string; captionStyle: string
     dataDir: string; customBaseUrl: string; customModel: string; ollamaModel: string
   }; environmentKeys: Record<string, string>; profiles: ProfileFixture[]; activeProfiles: { llm?: string | null; transcription?: string | null }
-  renderSettingsSaves: ProjectRenderSettings[]; analysisRequests: { mode: 'transcript' | 'visual'; brief: string }[]
+  renderSettingsSaves: ProjectRenderSettings[]; analysisRequests: { mode: 'auto' | 'transcript' | 'visual'; brief: string }[]
   previewFrames: Record<string, unknown>[]; suggestions: Record<string, unknown>[]; suggestionRequests: Record<string, unknown>[]
   renderRequests: { candidateId: string; body: Record<string, unknown> }[]; manualRequests: Record<string, unknown>[]; batchStyles: string[]; exportRequests: string[]
   clipStatusRequests: string[]; legacyJobStatusRequests: string[]; detailReads: number; batchProjectReads: number
@@ -196,7 +196,7 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
       return json({ status: 'started' }, 202)
     }
     if (path === '/projects/p1/analyze' && method === 'POST') {
-      const values = body(); state.analysisRequests.push({ mode: values.mode as 'transcript' | 'visual', brief: stringValue(values, 'brief') })
+      const values = body(); state.analysisRequests.push({ mode: values.mode as 'auto' | 'transcript' | 'visual', brief: stringValue(values, 'brief') })
       state.events.push('analyze:start'); state.candidates = candidatesFixture.map((candidate) => ({ ...candidate, selected: 0 })); state.clips = []; jobs.analysis.status = 'done'
       return json({ status: 'started' }, 202)
     }
@@ -557,8 +557,6 @@ test('numbered workflow transcribes, analyzes, and blocks render until selection
   await page.goto('/'); await page.getByRole('button', { name: `Open project ${projectFixture.name}` }).click()
   await expect(page.getByRole('button', { name: /Render selected/ })).toBeDisabled()
   await page.getByRole('button', { name: 'Transcribe audio', exact: true }).click(); await expect(page.getByRole('button', { name: 'Find clip candidates', exact: true })).toBeEnabled()
-  await expect(page.getByRole('radio', { name: 'Speech', exact: true })).toBeChecked()
-  await expect(page.getByRole('radio', { name: 'Video visuals', exact: true })).not.toBeChecked()
   await page.getByRole('button', { name: 'Find clip candidates', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: /Select clip/ })).toHaveCount(2)
   const candidate = page.locator('.candidate-card').first(); await candidate.getByRole('checkbox').click()
@@ -567,7 +565,7 @@ test('numbered workflow transcribes, analyzes, and blocks render until selection
   await expect(candidate.getByRole('button', { name: 'Render clip', exact: true })).toBeEnabled()
   await expect(candidate.getByRole('checkbox')).toBeChecked()
   expect(state.events).toEqual(['transcribe:start', 'analyze:start', 'selection:save'])
-  expect(state.analysisRequests).toEqual([{ mode: 'transcript', brief: '' }])
+  expect(state.analysisRequests).toEqual([{ mode: 'auto', brief: '' }])
   await candidate.getByRole('button', { name: 'Render clip', exact: true }).click(); await expect.poll(() => state.renderRequests.length).toBe(1)
   expect(state.renderRequests[0].candidateId).toBe('c1')
 })
@@ -586,8 +584,6 @@ test('silent projects can create and render a manual cut without transcription',
   await page.goto('/'); await page.getByRole('button', { name: `Open project ${projectFixture.name}` }).click()
   await expect(page.getByRole('button', { name: 'Find clip candidates', exact: true })).toBeEnabled()
   await expect(page.getByRole('heading', { name: 'Speech is optional.', exact: true })).toBeVisible()
-  await expect(page.getByRole('radio', { name: 'Video visuals', exact: true })).toBeChecked()
-  await expect(page.getByRole('radio', { name: 'Speech', exact: true })).toBeDisabled()
   await expect(page.getByLabel('Start (seconds)')).toHaveCount(0)
   const manualCut = page.getByRole('button', { name: 'Create manual cut', exact: true })
   await expect(manualCut).toHaveAttribute('aria-expanded', 'false'); await manualCut.click()
@@ -608,12 +604,10 @@ test('Manual mode finds visual clip candidates without requesting transcription'
   const state = await mockApi(page, { initialClips: [] }); state.transcript = null; state.candidates = []
   await page.goto('/'); await page.getByRole('button', { name: `Open project ${projectFixture.name}` }).click()
   await expect(page.getByRole('button', { name: 'Manual', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('radio', { name: 'Speech', exact: true })).toBeDisabled()
-  await expect(page.getByRole('radio', { name: 'Video visuals', exact: true })).toBeChecked()
   await page.getByRole('button', { name: 'Find clip candidates', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: /Select clip/ })).toHaveCount(2)
   await expect(page.getByRole('heading', { name: 'A strong moment 1', exact: true })).toBeVisible()
-  expect(state.analysisRequests).toEqual([{ mode: 'visual', brief: '' }])
+  expect(state.analysisRequests).toEqual([{ mode: 'auto', brief: '' }])
   expect(state.events).toEqual(['analyze:start']); expect(state.transcript).toBeNull()
   expect(state.renderRequests).toEqual([])
 })

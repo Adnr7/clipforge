@@ -44,7 +44,7 @@ browser mode is the easiest starting point.
 
 <table>
   <tr>
-    <td width="50%"><strong>Shape the story in AI Edit</strong><br /><img src="docs/images/ai-edit-dark.png" alt="AI Edit with project chat, an audience brief, and a reviewed visual recommendation" /></td>
+    <td width="50%"><strong>Shape the story in AI Edit</strong><br /><img src="docs/images/ai-edit-dark.png" alt="AI Edit with an audience brief, audio-and-visual recommendation, and reviewed automation" /></td>
     <td width="50%"><strong>Style the output in Light</strong><br /><img src="docs/images/caption-studio-light.png" alt="Light caption studio with source framing and eight caption presets" /></td>
   </tr>
 </table>
@@ -67,7 +67,7 @@ project/model responses. [Reproduce the screenshots](docs/testing.md#documentati
 | **Cut without AI** | Create and render exact manual time ranges, including silent video |
 | **Find spoken ideas** | Deepgram or local Whisper → timed evidence → audience-aware scout and critic |
 | **Inspect visual moments** | Bounded timestamped stills with an image-capable model; no transcript required |
-| **Guide an edit** | Project chat, shared audience/goal, visual advice, and reviewed automation |
+| **Guide an edit** | Shared audience/goal, audio-and-visual advice, and reviewed automation |
 | **Preserve or reframe** | Source, 16:9, 9:16, 1:1, 4:5, 4:3, 3:2; fit or center-crop |
 | **Make it readable** | Eight caption presets; font, outline, shadow, background, placement, and word grouping |
 | **Adjust the look** | Brightness, contrast, saturation, blur, sharpening, and exact rendered-frame previews |
@@ -76,13 +76,13 @@ project/model responses. [Reproduce the screenshots](docs/testing.md#documentati
 
 ### Choose your editing path
 
-| | Manual | Speech analysis | Visual analysis |
+| | Manual | Combined AI analysis | Visual-only fallback |
 | --- | --- | --- | --- |
-| Best for | A time range you already know | Interviews, talks, tutorials, podcasts | Demos, silent footage, music videos |
-| Needs transcription | No; only for captions | Yes, with real timestamps | No; speech context is optional |
-| Needs a model | No | Text-capable | Image-capable |
-| Boundary basis | Your start/end values | Supplied transcript units and quotes | Approximate intervals backed by sampled frames |
-| Review | Framing and final export | Relevance, opening, payoff, timing | Visible evidence, framing, timing |
+| Best for | A time range you already know | Any source where the AI should judge the whole story | Demos, silent footage, music videos |
+| Needs transcription | No; only for captions | When audio context is available | No |
+| Needs a model | No | Text-capable; vision improves video decisions | Image-capable |
+| Boundary basis | Your start/end values | Verified transcript candidates, checked against frames | Approximate intervals backed by sampled frames |
+| Review | Framing and final export | Audio payoff, visible evidence, relevance, timing | Visible evidence, framing, timing |
 
 ## How it works
 
@@ -90,13 +90,10 @@ project/model responses. [Reproduce the screenshots](docs/testing.md#documentati
 flowchart LR
   A[Import video or audio] --> B{Choose a path}
   B --> C[Manual time range]
-  B --> D[Timed speech + audience]
-  B --> E[Sampled frames + audience]
-  D --> F[Scout → critic → local ranking]
-  E --> G[Visual recommendations]
+  B --> D[Full timed speech + sampled frames + audience]
+  D --> F[Scout → critic → final audio/visual decision]
   C --> H[Review clips and settings]
   F --> H
-  G --> H
   H --> I[Render locally with FFmpeg]
   I --> J[Preview · MP4 · ZIP]
 ```
@@ -104,8 +101,13 @@ flowchart LR
 ### Audience first, source grounded
 
 Tell ClipForge **who should care** and **what they should take away**. The shared
-audience brief reaches Manual analysis, AI Edit, project chat, and editing-look
-suggestions. Changing fields alone does not call a model.
+audience brief reaches Manual analysis, AI Edit, combined audio-and-visual
+selection, and editing-look suggestions. Changing fields alone does not call a
+model.
+
+AI Edit uses one bounded brief contract across recommendations and analysis:
+audience and takeaway allow 1,000 characters each, notes allow 2,000, and the
+complete formatted brief sent to a provider is limited to 5,000 characters.
 
 For speech selection, the model scouts timestamped transcript units, then a
 separate critic call reviews the shortlisted text. Code resolves timestamps,
@@ -202,7 +204,7 @@ Open **Settings → Providers**, save a connection, and activate it.
 | Manual cuts / captionless rendering | Nothing — no AI key needed |
 | Cloud transcription | Deepgram API key |
 | Local transcription | `python -m pip install -r requirements-whisper.txt`, then a Whisper profile |
-| Speech selection / project chat | DeepSeek, Claude, Gemini, OpenAI, OpenRouter, Groq, Ollama, or custom OpenAI-compatible model |
+| Speech selection | DeepSeek, Claude, Gemini, OpenAI, OpenRouter, Groq, Ollama, or custom OpenAI-compatible model |
 | Visual selection / recommendations | An image-capable model on a supported connection |
 
 Whisper downloads its selected model on first use. Ollama runs as a separate
@@ -223,12 +225,13 @@ actual capability you need. [Provider setup and transport details](docs/developm
 ### With an audience brief
 
 1. Set **Audience & takeaway** in Manual, or the shared fields in **AI Edit**.
-2. Transcribe for speech selection, or choose **Video visuals** with a vision model.
-3. Run analysis; review boundaries, audience benefit, rubric, and source evidence.
+2. Let AI create timed speech context when audio is available.
+3. Run analysis; AI combines the full transcript with sampled frames, then review boundaries, audience benefit, rubric, and source evidence.
 4. Choose the clips and settings, render, and inspect the result.
 
-AI Edit defaults to **Auto** — speech when available, otherwise sampled frames —
-and **fresh analysis** for the current audience. Review the plan before starting.
+AI Edit uses **combined audio-and-visual analysis** when video and speech are
+available, and falls back to the strongest available evidence. Review the plan
+before starting.
 **Use AI recommended settings** is opt-in; reusing existing candidates does not
 rerank them for a new audience. [Detailed AI Edit behavior](docs/ai-edit-mode.md).
 
@@ -254,8 +257,7 @@ use another storage location.
 | Manual cuts, previews, renders, ZIPs | Local files and FFmpeg |
 | Deepgram transcription | Extracted audio sent to Deepgram |
 | Cloud speech selection | Timed transcript windows, shortlisted clip text, and editing brief |
-| Cloud project chat | Allowlisted technical metadata, optional transcript, brief and history |
-| Cloud visual analysis | Bounded timestamped JPEGs and optional text context; no audio |
+| Cloud audio-and-visual analysis | Full timed transcript, bounded timestamped JPEGs, and editing brief |
 | Local Whisper / local Ollama | Local inference after installing models |
 
 The app has no application telemetry and binds to localhost. Credentials are

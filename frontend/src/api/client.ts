@@ -224,6 +224,7 @@ export interface Project {
   source_metadata_json?: string | null
   created_at: string
   updated_at: string
+  visualAnalysis?: unknown
 }
 
 export interface Candidate {

@@ -84,7 +84,7 @@ and active selections are independent of project data. Legacy copy-metadata
 tables do not imply social-platform publishing is implemented.
 
 Audience drafts use `clipforge.audience.v1.<projectId>` in `localStorage` and are
-shared by Manual/AI controls. AI options/chat use project-scoped `sessionStorage`;
+shared by Manual/AI controls. AI editing options use project-scoped `sessionStorage`;
 neither storage resumes an interrupted plan automatically. Project detail
 serializes validated candidate metadata as `selection`, with `null` for legacy
 and manual cuts.
@@ -119,14 +119,16 @@ deduplication. No-approved-result and invalid-output failures preserve prior
 candidates/artifacts. See [Audience selection](audience-selection.md) for budgets,
 metadata, and evaluation.
 
-Visual analysis normally sends ten timestamped bounded JPEG samples through
-OpenAI-compatible multimodal requests or native Claude image blocks. It does
-not send audio or provide full-video/beat understanding.
+Visual analysis sends ten timestamped bounded JPEG samples through
+OpenAI-compatible multimodal requests or native Claude image blocks. When
+speech is available, the same editorial workflow first reviews the full timed
+transcript, then the vision request uses those verified spoken candidates plus
+the frames to make the final clip decision. Raw audio and full video are never
+sent to the model endpoint.
 
-Project chat uses allowlisted technical metadata and optional speech context.
-Chat and visual recommendations do not mutate candidates or editor settings.
-Analysis jobs persist candidates; AI Edit applies recommendations only through
-the user's reviewed workflow choice.
+Recommendations do not mutate candidates or editor settings. Analysis jobs
+persist candidates; AI Edit applies recommendations only through the user's
+reviewed workflow choice.
 
 See [AI Edit integration](ai-edit-mode.md) and the [API reference](api.md) for
 detailed contracts. Preview/advice capacity is bounded with semaphores, while

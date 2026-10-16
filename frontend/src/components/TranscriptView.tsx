@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { FileText, ScanText, ScanEye } from 'lucide-react'
+import { FileText, ScanEye, Sparkles } from 'lucide-react'
 import type { AudienceBrief, TranscriptData } from '../api/client'
 import { audienceFieldLimits } from '../api/audience'
 import { formatTime } from '../api/format'
 import WorkflowStep from './ui/WorkflowStep'
 
-export default function TranscriptView({ transcript, hasSpeech, currentTime, onAnalyze, analysisMode, onAnalysisModeChange, audienceBrief, onAudienceChange, hasCandidates, analyzing, disabled, onSeek, invalid }: {
+export default function TranscriptView({ transcript, hasSpeech, currentTime, onAnalyze, audienceBrief, onAudienceChange, hasCandidates, analyzing, disabled, onSeek, invalid }: {
   transcript: TranscriptData | null; hasSpeech: boolean; currentTime: number; onAnalyze: () => void; analyzing: boolean
   hasCandidates: boolean; disabled: boolean; onSeek: (seconds: number) => void; invalid: boolean
-  analysisMode: 'transcript' | 'visual'; onAnalysisModeChange: (mode: 'transcript' | 'visual') => void
   audienceBrief: AudienceBrief; onAudienceChange: (brief: AudienceBrief) => void
 }) {
   const activeRef = useRef<HTMLDivElement>(null)
@@ -33,17 +32,13 @@ export default function TranscriptView({ transcript, hasSpeech, currentTime, onA
         <label className="field">Audience notes & exclusions<textarea className="input-field" rows={2} maxLength={audienceFieldLimits.notes} value={audienceBrief.notes} onChange={(event) => onAudienceChange({ ...audienceBrief, notes: event.target.value })} placeholder="Knowledge level, topics to emphasize, and parts to avoid" /></label>
         <p className="field-hint">Shared with AI Edit and editing suggestions. If the audience is blank, the model labels its source-based audience assumption.</p>
       </fieldset></details>
-      <div className="analysis-modes" role="group" aria-label="Clip analysis source">
-        <label><input type="radio" name="analysis-mode" checked={analysisMode === 'transcript'} disabled={disabled || !hasSpeech} onChange={() => onAnalysisModeChange('transcript')} />Speech</label>
-        <label><input type="radio" name="analysis-mode" checked={analysisMode === 'visual'} disabled={disabled} onChange={() => onAnalysisModeChange('visual')} />Video visuals</label>
-      </div>
-      <button className="btn-accent" title={`Step 3: Analyze ${analysisMode === 'visual' ? 'video visuals' : 'transcript'}`} onClick={onAnalyze} disabled={disabled}><WorkflowStep step={3} />{analyzing ? <span className="spinner" /> : analysisMode === 'visual' ? <ScanEye size={15} /> : <ScanText size={15} />}{analyzing ? 'Finding highlights…' : hasCandidates ? 'Analyze again' : 'Find clip candidates'}</button>
-      <p className="analysis-hint">{analysisMode === 'visual' ? 'Ranks visible moments for your audience using sampled-frame evidence. No transcription required.' : 'Finds audience-relevant ideas from timed speech, then reviews their opening and payoff.'}</p>
+      <button className="btn-accent" title="Step 3: Let AI find the strongest clips from audio and video" onClick={onAnalyze} disabled={disabled}><WorkflowStep step={3} />{analyzing ? <span className="spinner" /> : <Sparkles size={15} />}{analyzing ? 'Finding highlights…' : hasCandidates ? 'Analyze again' : 'Find clip candidates'}</button>
+      <p className="analysis-hint">AI reviews the full timed speech transcript and sampled video frames together, then chooses complete clips for your audience. Speech is optional for video sources.</p>
       {!followPlayback && hasSpeech && <button className="text-button" onClick={() => setFollowPlayback(true)}>Follow playback</button>}
     </div>
     <div className="panel-body" ref={scrollerRef} onScroll={() => setFollowPlayback(false)}>
-       {!transcript && <div className="empty-state"><FileText size={30} strokeWidth={1.3} /><h3>{invalid ? 'Transcript could not be read' : 'Speech is optional.'}</h3><p>{invalid ? 'Transcribe again to recover speech. Visual analysis can still find highlights from video frames.' : 'Use Video visuals to find highlights in music, scenery, gameplay or any video without speech. Transcribe only when you need speech context or captions.'}</p></div>}
-       {transcript && !hasSpeech && <div className="empty-state"><ScanEye size={30} /><h3>No speech, still plenty to see.</h3><p>Use Video visuals above to let an image-capable model suggest highlights. Manual cuts are also available.</p></div>}
+        {!transcript && <div className="empty-state"><FileText size={30} strokeWidth={1.3} /><h3>{invalid ? 'Transcript could not be read' : 'Speech is optional.'}</h3><p>{invalid ? 'Transcribe again to restore audio context. AI can still inspect video frames.' : 'AI can find highlights from the video even without speech. Transcribe when you want spoken context or captions.'}</p></div>}
+        {transcript && !hasSpeech && <div className="empty-state"><ScanEye size={30} /><h3>No speech, still plenty to see.</h3><p>AI will use the visible video evidence to suggest highlights. Manual cuts are also available.</p></div>}
        {transcript && hasSpeech && <div className="transcript-list">{transcript.segments.map((segment, index) => <div className={`transcript-segment ${index === activeIndex ? 'active' : ''}`} key={`${segment.start}-${index}`} ref={index === activeIndex ? activeRef : undefined}><button className="timestamp" aria-label={`Seek to ${formatTime(segment.start)}`} onClick={() => { setFollowPlayback(true); onSeek(segment.start) }}>{formatTime(segment.start)}</button><div>{segment.speaker && <span className="transcript-speaker">{segment.speaker}</span>}<p>{segment.text}</p></div></div>)}</div>}
     </div>
   </>

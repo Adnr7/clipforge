@@ -76,8 +76,11 @@ const clips = [{ id: 'demo-render', candidate_id: 'demo-c1', status: 'done', out
     outputSettings: settings.outputSettings, output: { width: 1280, height: 720 } }) }]
 const recommendation = { audience: audience.audience, aspectRatio: { mode: 'preserve', ratio: 'source' },
   videoFilters: settings.videoFilters, captionSettings: { enabled: true, preset: 'classic', placement: 'bottom' },
-  candidates: candidates.map((candidate) => ({ start: candidate.start_sec, end: candidate.end_sec,
-    score: candidate.score, hook: candidate.hook, rationale: candidate.rationale, selection: { ...candidate.selection,
+  candidates: candidates.map((candidate, index) => ({ start: candidate.start_sec, end: candidate.end_sec,
+    score: candidate.score, hook: candidate.hook, rationale: candidate.rationale,
+    topic: candidate.selection.topic, audienceReason: candidate.selection.audienceReason,
+    assessment: candidate.selection.assessment, evidenceFrame: index === 0 ? 4 : 2,
+    evidenceDescription: 'A chart and speaker are visibly presented in the sampled frame.', selection: { ...candidate.selection,
       evidence: { basis: 'sampled-frames', timeSeconds: candidate.start_sec === 40 ? 40 : 20,
         description: 'A four-column chart presents a visible comparison.' } } })),
   rationale: 'Keep the full demonstration visible and use readable captions. Prioritize a complete example that gives these viewers a useful takeaway.',
@@ -162,7 +165,7 @@ try {
   await page.getByText('Audience fit & source evidence', { exact: true }).first().click()
   await save('workspace-dark.png')
   await page.getByRole('button', { name: 'AI Edit', exact: true }).click()
-  await page.getByRole('button', { name: 'Get visual recommendation', exact: true }).click()
+  await page.getByRole('button', { name: 'Get AI recommendation', exact: true }).click()
   await page.getByRole('region', { name: 'AI recommendation' }).getByText('Demo editorial model', { exact: false }).waitFor()
   await page.setViewportSize({ width: 1600, height: 1440 })
   await settleVideo()

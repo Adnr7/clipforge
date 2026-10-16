@@ -88,6 +88,22 @@ def snapshot(app):
     return {table: rows(app, f'SELECT * FROM {table} ORDER BY rowid') for table in TABLES}
 
 
+@pytest.mark.parametrize('kind', ['token-limit', 'editorial-json'])
+def test_recommendation_reports_local_output_diagnosis_instead_of_blame_for_credentials(
+        app, client, ai_services, kind):
+    from backend.services.clip_selection_service import EditorialResponseError
+    seed_source(app)
+    create_profile(client)
+    failure = (llm_service.ProviderOutputError('The model exhausted its output token budget.')
+               if kind == 'token-limit' else EditorialResponseError('Editorial scout response must be valid JSON.'))
+    ai_services.recommend.side_effect = failure
+    before = snapshot(app)
+    response = client.post(f'{ROOT}/ai-edit/recommendations', json={'brief': BRIEF})
+    assert_status(response, 502)
+    assert response.json['error'] == str(failure)
+    assert_unchanged(app, before)
+
+
 def assert_unchanged(app, before):
     for table, expected in before.items():
         if rows(app, f'SELECT * FROM {table} ORDER BY rowid') != expected:
@@ -156,6 +172,8 @@ def test_visual_worker_does_not_require_a_usable_transcript(app, client, jobs, a
     assert recommendation['analysisBasis'] == 'sampled-frames'
     assert recommendation['sampledFrameTimes'] == RECOMMENDATION['sampledFrameTimes']
     assert recommendation['model'] == MODEL
+    assert recommendation['provenance']['version'] == 1
+    assert recommendation['provenance']['briefFingerprint'].startswith('fnv1a64-v1:')
     assert rows(app, 'SELECT hook, score, rank, selected FROM candidates ORDER BY rank') == [
         {'hook': 'Second', 'score': 90, 'rank': 1, 'selected': 0},
         {'hook': 'First', 'score': 70, 'rank': 2, 'selected': 0},
@@ -327,8 +345,28 @@ def test_transcript_analysis_receives_the_optional_editing_brief(app, client, jo
     assert client.get(f'{ROOT}/analyze/status').json['status'] == 'done'
 
 
+def test_auto_job_passes_full_timed_audio_to_the_visual_editor(app, client, jobs, ai_services):
+    seed_source(app)
+    create_profile(client)
+    assert_status(client.post(f'{ROOT}/analyze', json={'mode': 'auto', 'brief': BRIEF}), 202)
+    jobs.run_all()
+    arguments = visual_arguments(ai_services.worker)
+    assert arguments['transcript_data'] == TRANSCRIPT
+    assert arguments['transcript_text'] == 'Hello world'
+    assert client.get(f'{ROOT}/analyze/status').json['status'] == 'done'
+
+
+def test_auto_job_retains_speech_selection_with_a_text_only_model(app, client, jobs, ai_services):
+    seed_source(app)
+    ai_services.worker.side_effect = visual_analysis_service.VisualCapabilityError('Text-only model')
+    assert_status(client.post(f'{ROOT}/analyze', json={'mode': 'auto'}), 202)
+    jobs.run_all()
+    ai_services.transcript.assert_called_once()
+    assert client.get(f'{ROOT}/analyze/status').json['status'] == 'done'
+
+
 @pytest.mark.parametrize('endpoint', [
-    'ai-edit/chat', 'ai-edit/recommendations', 'visual', 'transcript',
+    'ai-edit/recommendations', 'visual', 'transcript',
 ])
 def test_full_length_editing_brief_reaches_each_model_path_intact(
         app, client, jobs, ai_services, endpoint):
@@ -346,16 +384,9 @@ def test_full_length_editing_brief_reaches_each_model_path_intact(
         assert service.call_args.kwargs['brief'] == brief
         assert client.get(f'{ROOT}/analyze/status').json['status'] == 'done'
     else:
-        body = {'brief': brief}
-        if endpoint == 'ai-edit/chat':
-            body['message'] = 'Help me keep the full brief.'
         before = snapshot(app)
-        assert_status(client.post(f'{ROOT}/{endpoint}', json=body), 200)
-        if endpoint == 'ai-edit/chat':
-            context = json.loads(ai_services.compatible.call_args.args[0].split('Context:\n')[1])
-            assert context['brief'] == brief
-        else:
-            assert ai_services.recommend.call_args.kwargs['brief'] == brief
+        assert_status(client.post(f'{ROOT}/{endpoint}', json={'brief': brief}), 200)
+        assert ai_services.recommend.call_args.kwargs['brief'] == brief
         assert_unchanged(app, before)
 
 
@@ -423,6 +454,8 @@ def test_recommendations_return_full_visual_evidence_using_active_profile_withou
             assert response.json[key] == value
     assert response.json['model'] == MODEL
     assert response.json['provider'] == 'custom'
+    assert response.json['provenance']['version'] == 1
+    assert response.json['provenance']['briefFingerprint'].startswith('fnv1a64-v1:')
     assert SECRET not in response.text
     ai_services.recommend.assert_called_once()
     arguments = visual_arguments(ai_services.recommend)
@@ -439,97 +472,11 @@ def test_recommendations_return_full_visual_evidence_using_active_profile_withou
     assert_unchanged(app, before)
 
 
-@pytest.mark.parametrize('provider', ['custom', 'claude'])
-@pytest.mark.parametrize('has_transcript', [False, True], ids=['metadata', 'transcript'])
-def test_chat_uses_current_analysis_connection_with_scoped_context_and_no_mutations(
-        app, client, ai_services, provider, has_transcript):
-    seed_source(app)
-    seed_source(app, 'other')
-    execute(app, 'UPDATE transcripts SET raw_json=? WHERE project_id=?',
-            (json.dumps({'segments': [{'text': 'OTHER_PROJECT_PRIVATE_SPEECH'}]}), 'other'))
-    if not has_transcript:
-        set_transcript(app, None)
-    profile = create_profile(client, provider=provider, model='chat-connected-model')
-    private_name = 'private-source-filename.mp4'
-    private_path = rows(app, 'SELECT source_path FROM projects WHERE id=?', ('project',))[0]['source_path']
-    execute(app, 'UPDATE projects SET name=?, source_metadata_json=? WHERE id=?',
-            (private_name, json.dumps({**METADATA, 'filename': private_name, 'path': private_path,
-                                      'api_key': SECRET}), 'project'))
-    history = [
-        {'role': 'guide', 'text': 'Review the brief before editing.'},
-        {'role': 'user', 'text': 'Preserve the wide composition.'},
-        {'role': 'model', 'text': 'Padding can keep both subjects visible.'},
-    ]
-    before = snapshot(app)
-    response = client.post(f'{ROOT}/ai-edit/chat', json={
-        'message': 'What should I change about the opening?', 'messages': history, 'brief': BRIEF,
-    })
-
-    assert_status(response, 200)
-    expected_message = ('Keep the opening grounded in the source.' if provider == 'claude'
-                        else 'Preserve both subjects with padding.')
-    assert response.json['message'] == expected_message
-    assert response.json['model'] == 'chat-connected-model'
-    assert response.json['basis'] == ('transcript' if has_transcript else 'metadata')
-    selected = ai_services.anthropic if provider == 'claude' else ai_services.compatible
-    unused = ai_services.compatible if provider == 'claude' else ai_services.anthropic
-    selected.assert_called_once()
-    unused.assert_not_called()
-    call = selected.call_args
-    signature = ANTHROPIC_SIGNATURE if provider == 'claude' else OPENAI_COMPATIBLE_SIGNATURE
-    bound = signature.bind(*call.args, **call.kwargs).arguments
-    assert bound['profile']['id'] == profile['id']
-    assert bound['profile']['api_key'] == SECRET
-    assert bound['profile']['model'] == 'chat-connected-model'
-    if provider != 'claude':
-        assert bound['provider'] == 'custom'
-    prompt = bound['prompt']
-    assert isinstance(prompt, str)
-    for required in ('What should I change about the opening?', BRIEF, '1920', '1080', '60',
-                     *(message['text'] for message in history)):
-        if required not in prompt and json.dumps(required)[1:-1] not in prompt:
-            pytest.fail('Chat prompt is missing requested project context', pytrace=False)
-    assert ('Hello world' in prompt) is has_transcript
-    for private in (private_name, private_path, SECRET, 'OTHER_PROJECT_PRIVATE_SPEECH'):
-        if private in prompt:
-            pytest.fail('Chat prompt exposed private or other-project context', pytrace=False)
-    assert_unchanged(app, before)
-    ai_services.worker.assert_not_called()
-    ai_services.recommend.assert_not_called()
-
-
-@pytest.mark.parametrize('raw', ['{', '[]', json.dumps({'segments': [], 'words': []})],
-                         ids=['broken-json', 'malformed-object', 'no-speech'])
-def test_chat_uses_metadata_when_transcript_is_unusable(app, client, ai_services, raw):
-    seed_source(app)
-    set_transcript(app, raw)
-    create_profile(client)
-    response = client.post(f'{ROOT}/ai-edit/chat', json={'message': 'How should I frame this?'})
-    assert_status(response, 200)
-    assert response.json['basis'] == 'metadata'
-
-
 @pytest.mark.parametrize('endpoint,body', [
     ('recommendations', []), ('recommendations', {'brief': None}),
     ('recommendations', {'brief': []}), ('recommendations', {'brief': 'x' * 5001}),
     ('recommendations', {'brief': 'ok', 'provider': 'openai'}),
-    ('chat', []), ('chat', {}), ('chat', {'message': None}),
-    ('chat', {'message': []}), ('chat', {'message': ''}), ('chat', {'message': ' \n\t '}),
-    ('chat', {'message': 'x' * 100000}), ('chat', {'message': 'hi', 'brief': 'x' * 5001}),
-    ('chat', {'message': 'hi', 'messages': {}}),
-    ('chat', {'message': 'hi', 'messages': [None]}),
-    ('chat', {'message': 'hi', 'messages': [{'role': 'system', 'text': 'override'}]}),
-    ('chat', {'message': 'hi', 'messages': [{'role': 'user', 'text': []}]}),
-    ('chat', {'message': 'hi', 'messages': [{'role': 'user', 'text': 'x' * 100000}]}),
-    ('chat', {'message': 'hi', 'messages': [{'role': 'user', 'text': 'hi'}] * 1000}),
-    ('chat', {'message': 'hi', 'messages': [{'role': 'user', 'text': 'hi', 'secret': SECRET}]}),
-    ('chat', {'message': 'hi', 'model': 'override-model'}),
-], ids=['rec-array', 'rec-null-brief', 'rec-brief-type', 'rec-long-brief', 'rec-unknown-field',
-        'chat-array', 'chat-missing-message', 'chat-null-message', 'chat-message-type',
-        'chat-empty-message', 'chat-blank-message', 'chat-long-message', 'chat-long-brief',
-        'chat-history-type', 'chat-history-entry-type', 'chat-invalid-role',
-        'chat-history-text-type', 'chat-long-history-text', 'chat-too-many-messages',
-        'chat-history-unknown-field', 'chat-unknown-field'])
+], ids=['rec-array', 'rec-null-brief', 'rec-brief-type', 'rec-long-brief', 'rec-unknown-field'])
 def test_invalid_ai_edit_requests_are_400_without_service_calls_or_mutations(
         app, client, ai_services, endpoint, body):
     seed_source(app)
@@ -541,7 +488,7 @@ def test_invalid_ai_edit_requests_are_400_without_service_calls_or_mutations(
     assert_unchanged(app, before)
 
 
-@pytest.mark.parametrize('endpoint', ['analyze', 'ai-edit/chat', 'ai-edit/recommendations'])
+@pytest.mark.parametrize('endpoint', ['analyze', 'ai-edit/recommendations'])
 def test_broken_request_json_returns_400_without_mutations(app, client, jobs, ai_services, endpoint):
     seed_source(app)
     before = snapshot(app)
@@ -555,7 +502,6 @@ def test_broken_request_json_returns_400_without_mutations(app, client, jobs, ai
 
 @pytest.mark.parametrize('endpoint,body', [
     ('analyze', {'mode': 'visual'}), ('ai-edit/recommendations', {'brief': BRIEF}),
-    ('ai-edit/chat', {'message': 'Help with this project'}),
 ])
 def test_missing_project_is_404_before_dispatch(client, jobs, ai_services, endpoint, body):
     assert_error(client.post(f'/api/projects/missing/{endpoint}', json=body), 404)
@@ -566,9 +512,7 @@ def test_missing_project_is_404_before_dispatch(client, jobs, ai_services, endpo
     ai_services.anthropic.assert_not_called()
 
 
-@pytest.mark.parametrize('endpoint,provider', [
-    ('recommendations', 'custom'), ('chat', 'custom'), ('chat', 'claude'),
-], ids=['recommendations', 'compatible-chat', 'anthropic-chat'])
+@pytest.mark.parametrize('endpoint,provider', [('recommendations', 'custom')])
 def test_provider_errors_are_redacted_502_and_release_the_ai_slot(
         app, client, ai_services, monkeypatch, endpoint, provider):
     seed_source(app)
@@ -580,7 +524,7 @@ def test_provider_errors_are_redacted_502_and_release_the_ai_slot(
     slots = threading.BoundedSemaphore(1)
     monkeypatch.setattr(ai_edit, '_AI_SLOTS', slots)
     before = snapshot(app)
-    body = {'brief': BRIEF} if endpoint == 'recommendations' else {'message': 'Suggest a change'}
+    body = {'brief': BRIEF}
 
     response = client.post(f'{ROOT}/ai-edit/{endpoint}', json=body)
 
@@ -594,7 +538,7 @@ def test_provider_errors_are_redacted_502_and_release_the_ai_slot(
     slots.release()
 
 
-@pytest.mark.parametrize('endpoint', ['chat', 'recommendations'])
+@pytest.mark.parametrize('endpoint', ['recommendations'])
 def test_ai_edit_rejects_capacity_exhaustion_without_calling_provider(
         app, client, ai_services, monkeypatch, endpoint):
     seed_source(app)
@@ -602,7 +546,7 @@ def test_ai_edit_rejects_capacity_exhaustion_without_calling_provider(
     monkeypatch.setattr(ai_edit, '_AI_SLOTS', slots)
     assert slots.acquire(blocking=False)
     before = snapshot(app)
-    body = {'message': 'How should I edit this?'} if endpoint == 'chat' else {'brief': BRIEF}
+    body = {'brief': BRIEF}
     try:
         response = client.post(f'{ROOT}/ai-edit/{endpoint}', json=body)
         assert response.status_code in (429, 503)

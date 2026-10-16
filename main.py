@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 from backend.app import create_app
+from backend.config import configure_ffmpeg_runtime
 
 def start_server(app, port):
     """Run Flask in a background thread."""
@@ -15,10 +16,14 @@ def start_server(app, port):
 def main():
     port = int(os.environ.get('CLIPFORGE_PORT', '5174'))
     app = create_app()
+    # Re-resolve after create_app loads the project's and data directory's .env.
+    if not configure_ffmpeg_runtime() and sys.platform.startswith('linux'):
+        print('FFmpeg/FFprobe are unavailable. Run: python scripts/setup_ffmpeg_wsl.py',
+              file=sys.stderr)
 
     # --web mode: serve the app in the browser only (no desktop window)
     if '--web' in sys.argv:
-        print(f'ClipForge web server running at http://127.0.0.1:{port}')
+        print(f'ClipForge web server running at http://127.0.0.1:{port}', flush=True)
         start_server(app, port)
         return
 

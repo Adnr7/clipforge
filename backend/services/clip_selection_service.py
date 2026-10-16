@@ -8,6 +8,7 @@ import json
 import math
 import re
 import time
+import inspect
 
 METHOD = 'audience-first-v1'
 WEIGHTS = {'audienceFit': 35, 'hook': 20, 'payoff': 20, 'clarity': 15, 'shareability': 10}
@@ -18,6 +19,54 @@ MAX_FINALISTS = 16
 MAX_CLIPS = 8
 MAX_REVIEW_CHARS = 16000
 ANALYSIS_TIMEOUT = 20 * 60
+
+
+class EditorialResponseError(ValueError):
+    """A safe description of unusable editorial JSON, never the raw response."""
+
+
+def _schema_object(properties):
+    return {'type': 'object', 'properties': properties,
+            'required': list(properties), 'additionalProperties': False}
+
+
+def _schema_text(maximum):
+    return {'type': 'string', 'minLength': 1, 'maxLength': maximum}
+
+
+def _assessment_schema():
+    return _schema_object({key: {'type': 'number', 'minimum': 0, 'maximum': 5}
+                           for key in WEIGHTS})
+
+
+def transcript_scout_schema():
+    """Strict provider schema for the source-bound scout response."""
+    return _schema_object({
+        'audience': _schema_text(1000),
+        'candidates': {'type': 'array', 'maxItems': MAX_CLIPS, 'items': _schema_object({
+            'startUnit': {'type': 'integer', 'minimum': 0},
+            'endUnit': {'type': 'integer', 'minimum': 0},
+            'openingQuote': _schema_text(240),
+            'closingQuote': _schema_text(240),
+            'hook': _schema_text(200),
+            'topic': _schema_text(100),
+            'audienceReason': _schema_text(300),
+            'rationale': _schema_text(1000),
+            'assessment': _assessment_schema(),
+        })},
+    })
+
+
+def transcript_critic_schema():
+    """Strict provider schema for the independent critic response."""
+    return _schema_object({
+        'reviews': {'type': 'array', 'maxItems': MAX_FINALISTS, 'items': _schema_object({
+            'candidateId': {'type': 'integer', 'minimum': 0, 'maximum': MAX_FINALISTS - 1},
+            'selfContained': {'type': 'boolean'},
+            'assessment': _assessment_schema(),
+            'audienceReason': _schema_text(300),
+        })},
+    })
 
 EDITORIAL_POLICY = """AUDIENCE-FIRST EDITORIAL METHOD:
 1. Audience editor: identify the exact intended viewer, their knowledge level and
@@ -200,14 +249,15 @@ def timed_units(transcript, duration):
     return [{'id': index, **unit} for index, unit in enumerate(units)]
 
 
-def transcript_windows(units):
+def transcript_windows(units, maximum_chars=None):
     """Cover the full transcript with bounded windows and up to 60s overlap."""
+    maximum_chars = WINDOW_CHARS if maximum_chars is None else maximum_chars
     windows, start = [], 0
     while start < len(units):
         end, size = start, 0
         while end < len(units):
             length = len(json.dumps(units[end], ensure_ascii=False)) + 1
-            if size + length > WINDOW_CHARS:
+            if size + length > maximum_chars:
                 break
             size += length; end += 1
         if end == start:
@@ -229,8 +279,18 @@ def transcript_windows(units):
 def parse_model_object(text):
     if not isinstance(text, str) or len(text) > 32000:
         raise ValueError('Editorial response is invalid or oversized')
-    fence = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```', text.strip(), re.DOTALL | re.IGNORECASE)
-    text = fence.group(1) if fence else text.strip()
+    text = text.strip()
+    # Compatible models may wrap a complete answer in reasoning tags or a
+    # Markdown fence. Remove wrappers, never repair/infer missing JSON fields.
+    thought = re.match(r'<think>.*?</think>\s*', text, re.DOTALL | re.IGNORECASE)
+    if thought:
+        text = text[thought.end():].strip()
+    fences = list(re.finditer(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL | re.IGNORECASE))
+    if fences:
+        if len(fences) != 1 or any(char in text[:fences[0].start()] + text[fences[0].end():]
+                                   for char in '{}[]'):
+            raise ValueError('Editorial response must contain one JSON object')
+        text = fences[0].group(1).strip()
 
     def pairs(items):
         result = {}
@@ -252,14 +312,33 @@ def parse_model_object(text):
     return result
 
 
-def _scout_candidates(value, window, duration, audience_brief):
+def _model_supports_response_format(call_model):
+    """Preserve the two-argument callback used by integrations and fixtures."""
+    target = getattr(call_model, 'side_effect', None) or call_model
+    try:
+        parameters = inspect.signature(target).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(parameter.name == 'response_format' or parameter.kind in (
+        inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL
+    ) for parameter in parameters)
+
+
+def _invoke_model(call_model, prompt, maximum, response_format):
+    if _model_supports_response_format(call_model):
+        return call_model(prompt, maximum, response_format=response_format)
+    return call_model(prompt, maximum)
+
+
+def _scout_candidates(value, window, duration, audience_brief, *, discard_invalid=False):
     audience = audience_brief['audience'] or _text(value.get('audience'), 'Inferred audience', 1000)
     drafts = value.get('candidates')
     if not isinstance(drafts, list) or len(drafts) > MAX_CLIPS:
         raise ValueError('Editorial scout must return at most 8 candidates')
     by_id = {unit['id']: unit for unit in window}
-    result = []
-    for draft in drafts:
+    result, invalid = [], None
+
+    def candidate(draft):
         if not isinstance(draft, dict):
             raise ValueError('Editorial candidate must be an object')
         first, last = draft.get('startUnit'), draft.get('endUnit')
@@ -275,28 +354,77 @@ def _scout_candidates(value, window, duration, audience_brief):
         start, end = (0.0, duration) if duration < 15 else (
             by_id[first]['start'], max(unit['end'] for unit in window if first <= unit['id'] <= last))
         if not min(15, duration) <= end - start <= 60:
-            raise ValueError('Editorial clips must be 15–60 seconds, or the full shorter source')
+            valid_ends, end_time = [], by_id[first]['end']
+            for unit in window:
+                if unit['id'] < first:
+                    continue
+                end_time = max(end_time, unit['end'])
+                if min(15, duration) <= end_time - start <= 60:
+                    valid_ends.append(unit['id'])
+            raise ValueError('Editorial clips must be 15–60 seconds, or the full shorter source. '
+                             f'Units {first}–{last} resolve to {end - start:.2f} seconds. '
+                             f'Valid endUnit IDs for startUnit {first}: {valid_ends}')
         assessment = validate_assessment(draft.get('assessment'))
         selection = selection_metadata(audience, assessment, draft.get('audienceReason'), draft.get('topic'),
                     {'basis': 'transcript', 'openingQuote': opening, 'closingQuote': closing},
                     inferred=not audience_brief['audience'])
-        result.append({'start': start, 'end': end, 'score': editorial_score(assessment),
-                       'hook': _text(draft.get('hook'), 'Hook', 200),
-                       'rationale': _text(draft.get('rationale'), 'Rationale', 1000), 'selection': selection})
+        return {'start': start, 'end': end, 'score': editorial_score(assessment),
+                'hook': _text(draft.get('hook'), 'Hook', 200),
+                'rationale': _text(draft.get('rationale'), 'Rationale', 1000), 'selection': selection}
+
+    for draft in drafts:
+        try:
+            result.append(candidate(draft))
+        except ValueError as exc:
+            if not discard_invalid:
+                raise
+            invalid = exc
+    if drafts and not result and invalid is not None:
+        raise invalid
     return result, audience
 
 
-def analyze_timed_transcript(transcript, duration, brief, audience_brief, call_model):
+def analyze_timed_transcript(transcript, duration, brief, audience_brief, call_model, *,
+                             window_chars=None, response_tokens=4500, scout_limit=8,
+                             review_chars=None):
     """Evidence scout per window, then a separate critic using the same connection."""
     audience_brief = validate_audience_brief(audience_brief)
     units = timed_units(transcript, duration)
-    windows = transcript_windows(units)  # Validate coverage/budget before any provider request.
+    windows = transcript_windows(units, window_chars)  # Validate coverage/budget before any provider request.
     deadline = time.monotonic() + ANALYSIS_TIMEOUT
 
-    def request(prompt, maximum):
+    def request(prompt, maximum, phase, response_format, validate=None, salvage=None):
         if time.monotonic() >= deadline:
             raise ValueError('Editorial analysis exceeded its time budget; analyze a shorter source')
-        return call_model(prompt, maximum)
+        correction = ('\nCORRECTION: The previous response was not usable. Return exactly one valid JSON '
+                      f'object matching the {phase} schema above. Do not use a Markdown fence, commentary, '
+                      'reasoning tags or any extra fields.')
+        feedback = ''
+        for attempt in range(2):
+            if attempt and time.monotonic() >= deadline:
+                raise ValueError('Editorial analysis exceeded its time budget; analyze a shorter source')
+            text = _invoke_model(call_model, prompt + (correction + feedback if attempt else ''), maximum, response_format)
+            try:
+                value = parse_model_object(text)
+            except ValueError:
+                if attempt == 0:
+                    continue
+                raise EditorialResponseError(f'Editorial {phase} response must be valid JSON. '
+                                             'The model returned unreadable output after one correction.') from None
+            try:
+                return validate(value) if validate else value
+            except ValueError as exc:
+                if attempt:
+                    if salvage:
+                        # A single bad proposal must not discard unrelated
+                        # source-verified clips. Invalid drafts never survive
+                        # this boundary and the critic still reviews each one.
+                        return salvage(value)
+                    raise
+                # Validators emit local contract errors, never provider output.
+                # Make the corrective request actionable without echoing an
+                # untrusted response or inventing substitute source evidence.
+                feedback = f' Validation issue: {exc}. Check unit durations and copy quotes verbatim from the selected units.'
     overview = [{**units[index], 'text': units[index]['text'][:400]}
                 for index in sorted({0, len(units) // 2, len(units) - 1})]
     inferred = not audience_brief['audience']
@@ -307,16 +435,37 @@ def analyze_timed_transcript(transcript, duration, brief, audience_brief, call_m
         'topic': 'distinct idea', 'audienceReason': 'why this viewer cares',
         'rationale': 'complete setup and payoff', 'assessment': {key: 3 for key in WEIGHTS}}]}
     for window in windows:
-        prompt = (EDITORIAL_POLICY + '\nROLE: evidence scout. Select up to 8 strong, standalone clips. '
-                  'Use startUnit/endUnit IDs from this window; code resolves their source times. '
-                  'Opening/closing quotes must be exact text from the first/last selected unit. '
-                  'Clips must be 15–60 seconds, or the full source if shorter. Prefer natural '
-                  'sentence boundaries. Return only a JSON object of this shape (no score field):\n'
+        choices = []
+        for index, unit in enumerate(window):
+            end_time, valid_ends = unit['end'], []
+            for last in window[index:]:
+                end_time = max(end_time, last['end'])
+                length = duration if duration < 15 else end_time - unit['start']
+                if min(15, duration) <= length <= 60:
+                    valid_ends.append(last['id'])
+                if length > 60:
+                    break
+            choices.append({**unit, 'validEndUnits': valid_ends})
+        prompt = (EDITORIAL_POLICY + f'\nROLE: evidence scout. Select up to {scout_limit} strong, standalone clips. '
+                   'Use startUnit/endUnit IDs from this window; code resolves their source times. '
+                   'For each startUnit, choose endUnit ONLY from that unit\'s validEndUnits list. '
+                   'An empty validEndUnits list means that unit cannot start a clip. '
+                   'Opening/closing quotes must be exact text from the first/last selected unit. '
+                   'Clips must be 15–60 seconds, or the full source if shorter. Prefer natural '
+                   'sentence boundaries. Keep rationales under 40 words, audience reasons under 25 words, '
+                   'and quotes to short verbatim excerpts. Return only a JSON object of this shape (no score field):\n'
                   + json.dumps(shape) + '\nContext: ' + json.dumps({
                       'audienceBrief': {**audience_brief, 'audience': audience}, 'editingBrief': brief,
-                      'durationSeconds': duration, 'sourceOverview': overview, 'units': window}, ensure_ascii=False))
-        drafts, detected = _scout_candidates(parse_model_object(request(prompt, 4500)), window,
-                                            duration, {**audience_brief, 'audience': audience})
+                        'durationSeconds': duration, 'sourceOverview': overview, 'units': choices},
+                        ensure_ascii=False, separators=(',', ':')))
+        drafts, detected = request(prompt, response_tokens, 'scout', {
+            'type': 'json_schema', 'json_schema': {
+                'name': 'transcript_scout', 'strict': True, 'schema': transcript_scout_schema(),
+            },
+        }, validate=lambda value: _scout_candidates(
+            value, window, duration, {**audience_brief, 'audience': audience}),
+            salvage=lambda value: _scout_candidates(
+                value, window, duration, {**audience_brief, 'audience': audience}, discard_invalid=True))
         audience = audience or detected
         for candidate in drafts:
             candidate['selection']['audienceInferred'] = inferred
@@ -339,11 +488,12 @@ def analyze_timed_transcript(transcript, duration, brief, audience_brief, call_m
               + ',"audienceReason":"specific benefit for this viewer"}]}. '
               'Omit rejected candidates; do not introduce candidates or timestamps.\nContext: ')
     batches, batch, size = [], [], 0
+    review_chars = MAX_REVIEW_CHARS if review_chars is None else review_chars
     for candidate in review_context:
         length = len(json.dumps(candidate, ensure_ascii=False)) + 1
-        if length > MAX_REVIEW_CHARS:
+        if length > review_chars:
             raise ValueError('Clip context exceeds the bounded review budget')
-        if batch and size + length > MAX_REVIEW_CHARS:
+        if batch and size + length > review_chars:
             batches.append(batch); batch, size = [], 0
         batch.append(candidate); size += length
     if batch:
@@ -352,7 +502,11 @@ def analyze_timed_transcript(transcript, duration, brief, audience_brief, call_m
     for batch in batches:
         prompt = review_instruction + json.dumps({'audienceBrief': {**audience_brief, 'audience': audience},
                     'editingBrief': brief, 'candidates': batch}, ensure_ascii=False)
-        items = parse_model_object(request(prompt, 4500)).get('reviews')
+        items = request(prompt, response_tokens, 'critic', {
+            'type': 'json_schema', 'json_schema': {
+                'name': 'transcript_critic', 'strict': True, 'schema': transcript_critic_schema(),
+            },
+        }).get('reviews')
         if not isinstance(items, list) or len(items) > len(batch):
             raise ValueError('Editorial critic must return reviews of supplied candidates')
         allowed_ids = {candidate['candidateId'] for candidate in batch}

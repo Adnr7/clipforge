@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, Clapperboard, Cloud, HardDrive } from 'lucide-react'
 import { api, errorMessage, type TranscriptionMode } from '../api/client'
-import { enteredKeys } from '../api/providers'
+import { ANALYSIS_PROVIDERS, enteredKeys, KEY_PROVIDERS } from '../api/providers'
 import { useEnvironment } from '../hooks/useEnvironment'
 import { useToast } from '../hooks/useToast'
 import ThemeSelect from './ui/ThemeSelect'
 
 const steps = ['Welcome', 'Processing', 'Configure', 'Ready']
+const cloudAnalysisProviders = ANALYSIS_PROVIDERS.filter((provider) => provider.id !== 'ollama')
+
 export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState(0)
   const [mode, setMode] = useState<TranscriptionMode>('cloud')
   const [transcription, setTranscription] = useState<TranscriptionMode>('cloud')
+  const [analysisProvider, setAnalysisProvider] = useState('deepseek')
   const [keys, setKeys] = useState<Record<string, string>>({})
+  const [customBaseUrl, setCustomBaseUrl] = useState('')
+  const [customModel, setCustomModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<string | null>(null)
@@ -19,23 +24,35 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const { showToast } = useToast()
   const headingRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => { headingRef.current?.focus() }, [step])
+  const selectedAnalysisProvider = cloudAnalysisProviders.find((provider) => provider.id === analysisProvider) || cloudAnalysisProviders[0]
+  const selectedKeyProvider = KEY_PROVIDERS.find((provider) => provider.id === analysisProvider)
+  const selectedKeySetting = selectedKeyProvider?.setting || ''
+  const customProviderSelected = mode === 'cloud' && analysisProvider === 'custom'
 
   const save = async (test = false) => {
     if (busy) return
+    const customApiBase = customBaseUrl.trim().replace(/\/+$/, '')
+    if (customProviderSelected && (!/^https?:\/\/.+\/v1$/i.test(customApiBase) || !customModel.trim())) {
+      setError('Enter a custom API base URL ending in /v1 and a model before saving.')
+      return
+    }
     setBusy(true); setError(null); setTestResult(null)
     try {
-      await api.updateSettings({ LLM_PROVIDER: mode === 'local' ? 'ollama' : 'deepseek', TRANSCRIPTION_MODE: mode === 'local' ? 'local' : transcription, ...enteredKeys(keys) })
+      const settings = {
+        LLM_PROVIDER: mode === 'local' ? 'ollama' : analysisProvider,
+        TRANSCRIPTION_MODE: mode === 'local' ? 'local' : transcription,
+        ...enteredKeys(keys),
+        ...(customProviderSelected ? { CUSTOM_BASE_URL: customApiBase, CUSTOM_MODEL: customModel.trim() } : {}),
+      }
+      await api.updateSettings(settings)
       setKeys({})
       showToast('success', 'Setup preferences and entered keys saved')
       if (test) {
-        const providers = mode === 'local' ? ['ollama'] : ['deepseek']
-        const results = await Promise.all(providers.map(async (provider) => {
-          const result = await api.testConnection(provider)
-          return { provider, ...result }
-        }))
-        const message = results.map((result) => `${result.provider}: ${result.message}`).join(' · ')
+        const provider = mode === 'local' ? 'ollama' : analysisProvider
+        const result = await api.testConnection(provider)
+        const message = `${provider}: ${result.message}`
         setTestResult(message)
-        showToast(results.every((result) => result.ok) ? 'success' : 'error', message)
+        showToast(result.ok ? 'success' : 'error', message)
       } else setStep(3)
     } catch (error) { setError(errorMessage(error)); showToast('error', errorMessage(error)) }
     finally { setBusy(false) }
@@ -49,10 +66,10 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
         <p className="eyebrow">YOUR EDITING WORKSPACE</p>
         <h1 ref={headingRef} tabIndex={-1}>{['Good stories deserve a shorter cut.', 'Choose how you work.', 'Connect your tools.', 'Your workspace is ready.'][step]}</h1>
         {step === 0 && <div className="stack"><p className="intro-copy">Find the moments worth sharing. Import your media, review the transcript, and turn strong ideas into captioned clips.</p><div className="setup-summary"><span>01 / Import media</span><span>02 / Find moments</span><span>03 / Export clips</span></div><button className="btn-accent align-start" onClick={() => setStep(1)}>Set up ClipForge <ArrowRight size={16} /></button><button className="text-button align-start" onClick={onComplete}>Go to projects — configure later</button></div>}
-        {step === 1 && <div className="stack"><p className="muted">Choose a starting point. You can change individual providers in Settings.</p><fieldset className="stack compact"><legend className="sr-only">Processing mode</legend>{(['cloud', 'local'] as const).map((value) => <label key={value} className={`mode-card ${mode === value ? 'selected' : ''}`}><input type="radio" name="mode" value={value} checked={mode === value} onChange={() => { setMode(value); setTranscription(value) }} />{value === 'cloud' ? <Cloud size={24} /> : <HardDrive size={24} />}<span><strong>{value === 'cloud' ? 'Cloud assisted' : 'Local processing'}</strong><span>{value === 'cloud' ? 'DeepSeek analyzes transcripts. Deepgram transcribes audio, or use local Whisper.' : 'Ollama analyzes transcripts and Whisper transcribes audio on your server.'}</span></span></label>)}</fieldset><div className="form-actions"><button className="btn-secondary" onClick={() => setStep(0)}><ArrowLeft size={15} />Back</button><button className="btn-accent" onClick={() => setStep(2)}>Continue<ArrowRight size={15} /></button></div></div>}
+        {step === 1 && <div className="stack"><p className="muted">Choose a starting point. You can change individual providers in Settings.</p><fieldset className="stack compact"><legend className="sr-only">Processing mode</legend>{(['cloud', 'local'] as const).map((value) => <label key={value} className={`mode-card ${mode === value ? 'selected' : ''}`}><input type="radio" name="mode" value={value} checked={mode === value} onChange={() => { setMode(value); setTranscription(value) }} />{value === 'cloud' ? <Cloud size={24} /> : <HardDrive size={24} />}<span><strong>{value === 'cloud' ? 'Cloud assisted' : 'Local processing'}</strong><span>{value === 'cloud' ? 'Choose an analysis provider such as DeepSeek, OpenAI, or a custom OpenAI-compatible endpoint. DeepSeek is the default; Deepgram transcribes audio, or use local Whisper.' : 'Ollama analyzes transcripts and Whisper transcribes audio on your server.'}</span></span></label>)}</fieldset><div className="form-actions"><button className="btn-secondary" onClick={() => setStep(0)}><ArrowLeft size={15} />Back</button><button className="btn-accent" onClick={() => setStep(2)}>Continue<ArrowRight size={15} /></button></div></div>}
         {step === 2 && <form className="stack" onSubmit={(event) => { event.preventDefault(); void save() }}>
-          <fieldset disabled={busy} className="stack">
-            {mode === 'cloud' ? <><p className="muted">Entered keys are saved on your server. Leave a field blank to keep an existing key; you can add keys later in Settings.</p><label className="field">DeepSeek API key<input className="input-field" type="password" autoComplete="new-password" spellCheck={false} placeholder={status?.hasDeepseekKey ? 'Key saved · enter to replace' : 'Analysis API key'} value={keys.DEEPSEEK_API_KEY || ''} onChange={(event) => setKeys((previous) => ({ ...previous, DEEPSEEK_API_KEY: event.target.value }))} /></label><label className="field">Transcription<select className="input-field" value={transcription} onChange={(event) => setTranscription(event.target.value as TranscriptionMode)}><option value="cloud">Cloud · Deepgram</option><option value="local">Local · Whisper</option></select></label><label className="field">Deepgram API key<input className="input-field" type="password" autoComplete="new-password" spellCheck={false} placeholder={status?.hasDeepgramKey ? 'Key saved · enter to replace' : 'Transcription API key (optional for local mode)'} value={keys.DEEPGRAM_API_KEY || ''} onChange={(event) => setKeys((previous) => ({ ...previous, DEEPGRAM_API_KEY: event.target.value }))} /></label><p className="muted">Cloud processing sends audio or transcripts to the selected provider.</p></> : <div className="setup-instructions"><h3>Local tools</h3><p>Start Ollama and download its default model:</p><code>ollama serve</code><code>ollama pull llama3.2</code><p>Install Whisper in the backend Python environment:</p><code>pip install openai-whisper</code><p className="muted">The first Whisper run may download its model. Both tools run on the ClipForge server.</p></div>}
+           <fieldset disabled={busy} className="stack">
+             {mode === 'cloud' ? <><p className="muted">Choose the analysis provider for cloud processing. Entered keys are saved on your server; leave a key blank to keep an existing key. DeepSeek is selected by default, and you can add or change providers later in Settings.</p><label className="field">Analysis provider<select className="input-field" value={analysisProvider} onChange={(event) => setAnalysisProvider(event.target.value)}>{cloudAnalysisProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label><label className="field">{customProviderSelected ? 'Custom API key' : `${selectedAnalysisProvider.label} API key`}<input className="input-field" type="password" autoComplete="new-password" spellCheck={false} placeholder={selectedKeyProvider && status?.[selectedKeyProvider.statusKey] ? 'Key saved · enter to replace' : customProviderSelected ? 'API key (optional)' : 'Analysis API key'} value={keys[selectedKeySetting] || ''} onChange={(event) => selectedKeySetting && setKeys((previous) => ({ ...previous, [selectedKeySetting]: event.target.value }))} /></label>{customProviderSelected && <><span className="field-hint">The API key is optional for endpoints that do not require authentication.</span><label className="field">Base URL<input className="input-field" type="url" required placeholder="https://api.example.com/v1" value={customBaseUrl} onChange={(event) => setCustomBaseUrl(event.target.value)} aria-describedby="custom-base-url-hint" /><span id="custom-base-url-hint" className="field-hint">Use the API base URL ending in /v1. ClipForge appends /chat/completions.</span></label><label className="field">Model<input className="input-field" required placeholder="Model name" value={customModel} onChange={(event) => setCustomModel(event.target.value)} /></label></>}<label className="field">Transcription<select className="input-field" value={transcription} onChange={(event) => setTranscription(event.target.value as TranscriptionMode)}><option value="cloud">Cloud · Deepgram</option><option value="local">Local · Whisper</option></select></label><label className="field">Deepgram API key<input className="input-field" type="password" autoComplete="new-password" spellCheck={false} placeholder={status?.hasDeepgramKey ? 'Key saved · enter to replace' : 'Transcription API key (optional for local mode)'} value={keys.DEEPGRAM_API_KEY || ''} onChange={(event) => setKeys((previous) => ({ ...previous, DEEPGRAM_API_KEY: event.target.value }))} /></label><p className="muted">Cloud processing sends audio or transcripts to the selected analysis provider.</p></> : <div className="setup-instructions"><h3>Local tools</h3><p>Start Ollama and download its default model:</p><code>ollama serve</code><code>ollama pull llama3.2</code><p>Install Whisper in the backend Python environment:</p><code>pip install openai-whisper</code><p className="muted">The first Whisper run may download its model. Both tools run on the ClipForge server.</p></div>}
             {status && (!status.hasFfmpeg || !status.hasFfprobe) && <div className="notice notice-warning">Install FFmpeg and FFprobe on the server before importing or rendering media.</div>}
             <button type="button" className="btn-secondary align-start" onClick={() => void save(true)}>{busy && <span className="spinner" />}Save & test analysis connection</button>
             {testResult && <p className="muted" role="status">{testResult}</p>}

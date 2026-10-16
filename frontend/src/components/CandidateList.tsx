@@ -1,16 +1,16 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Download, Play, Scissors, SlidersHorizontal } from 'lucide-react'
+import { Download, Play, Scissors, SlidersHorizontal, XCircle } from 'lucide-react'
 import { api, type Candidate, type Clip } from '../api/client'
 import { formatTime } from '../api/format'
 import { isActiveJob, isFailedJob, latestClips } from '../api/jobs'
 import ClipPreview from './ClipPreview'
 import WorkflowStep from './ui/WorkflowStep'
 
-export default function CandidateList({ candidates, clips, sourceDuration, preferredClipIds, onCreateManualCut, onRender, onSeek, onSelectToggle, selectionBusy, renderBusy, captionStyle, onOpenControls, disabled }: {
+export default function CandidateList({ candidates, clips, sourceDuration, preferredClipIds, onCreateManualCut, onRender, onSeek, onSelectToggle, selectionBusy, renderBusy, captionStyle, onOpenControls, disabled, analysisFailed, analysisError, onRetryAnalysis }: {
   candidates: Candidate[]; clips: Clip[]; onRender: (candidate: Candidate) => void; onSeek: (time: number) => void
   sourceDuration: number; preferredClipIds: Record<string, string>; onCreateManualCut: (startSec: number, endSec: number, title: string) => void
   onSelectToggle: (candidate: Candidate, selected: boolean) => void; selectionBusy: boolean; renderBusy: boolean
-  captionStyle: string; onOpenControls: () => void; disabled: boolean
+  captionStyle: string; onOpenControls: () => void; disabled: boolean; analysisFailed: boolean; analysisError?: string | null; onRetryAnalysis: () => void
 }) {
   const byCandidate = useMemo(() => latestClips(clips), [clips])
   const completed = useMemo(() => latestClips(clips.filter((clip) => clip.status === 'done')), [clips])
@@ -30,7 +30,7 @@ export default function CandidateList({ candidates, clips, sourceDuration, prefe
     <div className="candidate-toolbar"><span>Next render: {captionStyle}</span><p className="field-hint">Downloads keep their rendered look. Re-render for changes.</p></div>
     {manualOpen && <form className="manual-cut-form" onSubmit={submitManual}><strong>Create a manual cut</strong><p className="field-hint">Choose an exact time range from any video.</p><div className="form-grid"><label className="field">Start (seconds)<input className="input-field" type="number" min="0" max={sourceDuration || undefined} step=".01" value={manualStart} onChange={(event) => setManualStart(event.target.value)} required /></label><label className="field">End (seconds)<input className="input-field" type="number" min="0" max={sourceDuration || undefined} step=".01" value={manualEnd} onChange={(event) => setManualEnd(event.target.value)} required /></label><label className="field full-width">Title <span className="field-hint">Optional</span><input className="input-field" maxLength={200} value={manualTitle} onChange={(event) => setManualTitle(event.target.value)} placeholder="Manual cut" /></label></div><button className="btn-accent" disabled={disabled || selectionBusy || renderBusy || !sourceDuration}><WorkflowStep step={4} />Add manual cut</button>{!sourceDuration && <p className="field-hint">Source duration is unavailable; re-import or probe the media first.</p>}</form>}
     <div className="panel-body candidate-list">
-      {candidates.length === 0 && <div className="empty-state"><Scissors size={30} strokeWidth={1.3} /><h3>Find your strongest moments.</h3><p>Analyze speech or video visuals for AI highlights. Create a manual cut when you want an exact time range.</p></div>}
+       {candidates.length === 0 && (analysisFailed ? <div className="empty-state"><XCircle size={30} strokeWidth={1.3} /><h3>Analysis needs a retry.</h3><p>{analysisError || 'The model did not return usable clip candidates.'} Try again with the same brief or adjust the audience and takeaway.</p><button className="btn-accent" disabled={disabled || renderBusy || selectionBusy} onClick={onRetryAnalysis}>Retry analysis</button></div> : <div className="empty-state"><Scissors size={30} strokeWidth={1.3} /><h3>Find your strongest moments.</h3><p>Analyze speech or video visuals for AI highlights. Create a manual cut when you want an exact time range.</p></div>)}
       {candidates.map((candidate) => {
         const clip = byCandidate.get(candidate.id)
         const active = isActiveJob(clip?.status)

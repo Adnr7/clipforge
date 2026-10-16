@@ -184,3 +184,153 @@ def test_anthropic_joins_text_blocks_and_ignores_thinking():
             {'type': 'text', 'text': ' []}'},
         ]}
         assert call_anthropic('Return JSON') == '{"candidates": []}'
+
+
+def test_json_object_rejection_falls_back_to_prompt_json_without_switching_connection():
+    response = requests.Response()
+    response.status_code = 400
+    response._content = b'{"error":{"message":"response_format is not supported"}}'
+    success = MagicMock()
+    success.json.return_value = {'choices': [{'message': {'content': '{"ok":true}'}}]}
+    with patch('backend.services.llm_service.requests.post', side_effect=[response, success]) as post:
+        assert call_openai_compatible('Return JSON', 'groq', retries=1) == '{"ok":true}'
+        first, last = post.call_args_list
+        assert first.kwargs['json']['response_format'] == {'type': 'json_object'}
+        assert 'response_format' not in last.kwargs['json']
+        assert first.kwargs['json']['model'] == last.kwargs['json']['model']
+        assert first.args == last.args
+
+
+def test_analysis_provider_status_is_actionable_without_echoing_private_response():
+    from backend.services.llm_service import ProviderRequestError, provider_failure_message
+    message = provider_failure_message(ProviderRequestError('PRIVATE SOURCE AND API KEY', 429), 'groq')
+    assert 'HTTP 429' in message and 'quota' in message
+    assert 'PRIVATE' not in message
+
+
+def test_rate_limit_cooldown_is_honored_before_the_bounded_retry():
+    limited = requests.Response()
+    limited.status_code = 429
+    limited.headers['Retry-After'] = '3.5'
+    limited._content = b'{"error":{"message":"Too many requests"}}'
+    success = MagicMock()
+    success.json.return_value = {'choices': [{'message': {'content': '{}'}}]}
+    with patch('backend.services.llm_service.requests.post', side_effect=[limited, success]) as post, patch('backend.services.llm_service.time.sleep') as sleep:
+        assert call_openai_compatible('Return JSON', 'groq', retries=2) == '{}'
+        sleep.assert_called_once_with(3.5)
+        assert post.call_count == 2
+
+
+def test_groq_body_cooldown_is_honored_when_retry_after_header_is_missing():
+    limited = requests.Response()
+    limited.status_code = 429
+    limited._content = b'{"error":{"message":"Rate limit reached. Please try again in 10.2s."}}'
+    success = MagicMock()
+    success.json.return_value = {'choices': [{'message': {'content': '{}'}}]}
+    with patch('backend.services.llm_service.requests.post', side_effect=[limited, success]), patch('backend.services.llm_service.time.sleep') as sleep:
+        assert call_openai_compatible('Return JSON', 'groq', retries=2) == '{}'
+        sleep.assert_called_once_with(10.45)
+
+
+def test_compound_rate_limit_cooldown_is_parsed_without_waiting_past_the_budget():
+    from backend.services.llm_service import _retry_delay
+    response = requests.Response()
+    response._content = b'{"error":{"message":"Please try again in 1m6.5s."}}'
+    assert _retry_delay(response, 0) == 66.75
+    response._content = b'{"error":{"message":"Please try again in 20m."}}'
+    assert _retry_delay(response, 0) == 1
+
+
+def test_rate_limit_delay_after_long_model_and_account_prefix_is_not_truncated():
+    from backend.services.llm_service import _retry_delay
+    response = requests.Response()
+    message = ('Rate limit reached for model deepseek-reasoning-editor in organization '
+               + 'private-account-reference-' * 8
+               + ' on tokens per minute (TPM): Limit 6000, Used 3800, Requested 4200. '
+                 'Please try again in 25.5s.')
+    response._content = json.dumps({'error': {'message': message}}).encode()
+    assert _retry_delay(response, 0) == 25.75
+
+
+def completion_response(content, finish_reason='stop', **message):
+    response = MagicMock()
+    response.json.return_value = {'choices': [{'finish_reason': finish_reason,
+                                             'message': {'content': content, **message}}]}
+    return response
+
+
+def test_reasoning_only_length_response_gets_larger_budget_on_the_same_connection():
+    profile = {'model': 'unknown-reasoning-editor', 'base_url': 'https://editor.example.test/v1',
+               'api_key': 'private-test-key'}
+    with patch('backend.services.llm_service.requests.post', side_effect=[
+            completion_response('', 'length', reasoning='private reasoning'),
+            completion_response('{"candidates":[]}')]) as post:
+        assert call_openai_compatible('Return JSON', 'custom', profile=profile, max_tokens=4500) == '{"candidates":[]}'
+    first, second = post.call_args_list
+    assert first.kwargs['json']['max_tokens'] == 4500
+    assert second.kwargs['json']['max_tokens'] == 9000
+    assert first.kwargs['json']['messages'] == second.kwargs['json']['messages']
+    assert first.kwargs['headers'] == second.kwargs['headers']
+    assert first.args == second.args
+
+
+@pytest.mark.parametrize('content', ['', '{"candidates":[', '{"candidates":[]}'])
+def test_repeated_token_limit_is_explicit_and_never_treated_as_valid_json(content):
+    from backend.services.llm_service import ProviderOutputError
+    with patch('backend.services.llm_service.requests.post', return_value=completion_response(
+            content, 'length', reasoning='PRIVATE SOURCE AND API KEY')) as post:
+        with pytest.raises(ProviderOutputError, match='output token budget') as error:
+            call_openai_compatible('Return JSON', 'openai', max_tokens=4500)
+    assert post.call_count == 2
+    assert 'PRIVATE' not in str(error.value)
+    assert error.value.__suppress_context__
+
+
+def test_completion_budget_retry_preserves_negotiated_token_parameter():
+    rejection = requests.Response()
+    rejection.status_code = 400
+    rejection._content = b'{"error":{"message":"Use max_completion_tokens instead of max_tokens"}}'
+    with patch('backend.services.llm_service.requests.post', side_effect=[rejection,
+            completion_response('{', 'length'), completion_response('{}')]) as post:
+        assert call_openai_compatible('Return JSON', 'openai', max_tokens=4500) == '{}'
+    assert post.call_args_list[1].kwargs['json']['max_completion_tokens'] == 4500
+    assert post.call_args_list[2].kwargs['json']['max_completion_tokens'] == 9000
+    assert 'max_tokens' not in post.call_args_list[2].kwargs['json']
+
+
+@pytest.mark.parametrize('model,base_url,effort,tokens', [
+    ('deepseek-ai/DeepSeek-V4-Flash-0731', 'https://inference.dahl.global/v1', 'low', 8192),
+    ('openai/gpt-oss-120b', 'https://api.groq.com/openai/v1', 'low', 2000),
+    ('qwen/qwen3.8-27b', 'https://api.groq.com/openai/v1', 'none', 2000),
+])
+def test_known_reasoning_models_reserve_answer_room_and_use_supported_effort(model, base_url, effort, tokens):
+    with patch('backend.services.llm_service.requests.post', return_value=completion_response('{}')) as post:
+        assert call_openai_compatible('Return JSON', 'custom', profile={
+            'model': model, 'base_url': base_url, 'api_key': 'fixture'}, max_tokens=2000) == '{}'
+    body = post.call_args.kwargs['json']
+    assert body['reasoning_effort'] == effort
+    assert body['max_tokens'] == tokens
+    assert post.call_args.kwargs['timeout'][1] >= 180
+
+
+def test_gateway_rejection_of_reasoning_control_does_not_break_model_compatibility():
+    rejection = requests.Response()
+    rejection.status_code = 400
+    rejection._content = b'{"error":{"message":"Unsupported parameter: reasoning_effort"}}'
+    with patch('backend.services.llm_service.requests.post', side_effect=[rejection,
+            completion_response('{}')]) as post:
+        assert call_openai_compatible('Return JSON', 'custom', profile={
+            'model': 'deepseek-ai/DeepSeek-V4-Flash-0731',
+            'base_url': 'https://editor.example.test/v1'}, max_tokens=4500) == '{}'
+    first, second = post.call_args_list
+    assert 'reasoning_effort' not in second.kwargs['json']
+    assert first.kwargs['json']['model'] == second.kwargs['json']['model']
+    assert first.kwargs['json']['response_format'] == second.kwargs['json']['response_format']
+
+
+def test_content_blocks_use_answer_text_without_promoting_reasoning_to_an_answer():
+    response = completion_response([{'type': 'reasoning', 'text': 'private thoughts'},
+                                    {'type': 'text', 'text': '{"candidates":'},
+                                    {'type': 'output_text', 'text': '[]}'}])
+    with patch('backend.services.llm_service.requests.post', return_value=response):
+        assert call_openai_compatible('Return JSON', 'openai') == '{"candidates":[]}'

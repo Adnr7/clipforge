@@ -14,15 +14,15 @@ from backend.routes.transcription import (
 )
 from backend.services.llm_service import PROVIDERS, analyze_transcript, parse_candidates
 from backend.services.llm_service import provider_model
-from backend.services.visual_analysis_service import analyze_video
-from backend.services.editing_brief import validate_editing_brief
+from backend.services.visual_analysis_service import analyze_video, VisualCapabilityError
+from backend.services.editing_brief import validate_editing_brief, editing_brief_fingerprint
 from backend.services.clip_selection_service import validate_audience_brief
 
 analysis_bp = Blueprint('analysis', __name__)
 
 
 def analysis_connection(db, data):
-    """One selection contract for speech, visuals, recommendations and chat."""
+    """One selection contract for speech, visuals and recommendations."""
     provider = data.get('provider')
     profile = None
     if data.get('profileId') is not None:
@@ -43,7 +43,7 @@ def analysis_connection(db, data):
 
 
 def transcript_context(db, project_id, required=False):
-    """Optional speech never prevents a visual job or project chat."""
+    """Optional speech never prevents a visual job."""
     row = db.execute('SELECT raw_json FROM transcripts WHERE project_id=? '
                      'ORDER BY created_at DESC, rowid DESC LIMIT 1', (project_id,)).fetchone()
     if row is None:
@@ -68,20 +68,65 @@ def transcript_context(db, project_id, required=False):
         return '', {}
 
 
+def _source_has_video(project):
+    try:
+        metadata = json.loads(project.get('source_metadata_json') or '{}')
+    except (TypeError, ValueError):
+        metadata = {}
+    return metadata.get('has_video') is not False if isinstance(metadata, dict) else True
+
+
 def _run_analysis(app, project_id, transcript_text, duration, provider, profile=None,
                   mode='transcript', source_path=None, brief='', transcript_data=None,
                   audience_brief=None):
     """Validate the complete replacement before changing any existing candidates."""
     with app.app_context():
         try:
+            project = _get_project(get_db(), project_id)
+            current_app.logger.info(
+                'Analysis started for project %s: mode=%s provider=%s model=%s duration=%ss',
+                project_id, mode, provider, provider_model(provider, profile), duration,
+            )
             visual = None
-            if mode == 'visual':
+            # Auto is the normal product path: when speech is available, the
+            # vision model receives both sampled frames and the timed speech
+            # context derived from the source audio. Text-only connections can
+            # still complete the job through the transcript scout/critic path.
+            if mode == 'auto' and _source_has_video(project):
+                try:
+                    visual = analyze_video(source_path, provider, profile=profile,
+                                           brief=brief, transcript_text=transcript_text,
+                                           transcript_data=transcript_data,
+                                           capability_fallback='transcript',
+                                           audience_brief=audience_brief)
+                except VisualCapabilityError:
+                    if not transcript_text:
+                        raise
+                    # Text-only analysis models can still finish an automatic
+                    # job from the full audio transcript when they cannot
+                    # inspect frames.
+                    candidates = None
+                else:
+                    candidates = visual['candidates']
+                    if not isinstance(candidates, list):
+                        raise ValueError('Visual analysis returned no usable candidates')
+            elif mode == 'auto':
+                candidates = None
+            elif mode == 'visual':
                 visual = analyze_video(source_path, provider, profile=profile,
                                        brief=brief, transcript_text=transcript_text,
+                                       transcript_data=transcript_data,
                                        audience_brief=audience_brief)
-                visual = {**visual, 'model': provider_model(provider, profile), 'provider': provider}
                 candidates = visual['candidates']
+                if not isinstance(candidates, list):
+                    raise ValueError('Visual analysis returned no usable candidates')
             else:
+                candidates = None
+            if visual is not None:
+                visual = {**visual, 'model': provider_model(provider, profile), 'provider': provider,
+                          'provenance': {'version': 1,
+                                         'briefFingerprint': editing_brief_fingerprint(brief, audience_brief)}}
+            if candidates is None:
                 options = {'profile': profile}
                 if transcript_data is not None:
                     options['transcript_data'] = transcript_data
@@ -113,6 +158,7 @@ def _run_analysis(app, project_id, transcript_text, duration, provider, profile=
                           analysis_error=NULL, visual_analysis_json=?, updated_at=? WHERE id=?''',
                        ('analyzed', json.dumps(visual, allow_nan=False) if visual else None, _now(), project_id))
             db.commit()
+            current_app.logger.info('Analysis completed for project %s', project_id)
         except Exception as exc:
             _fail_project_job(project_id, 'analyzing', exc)
 
@@ -127,9 +173,11 @@ def analyze_project(project_id):
         data = _json_object()
         if set(data) - {'mode', 'brief', 'provider', 'profileId', 'audienceBrief'}:
             raise _RouteError('Only mode, brief, provider, profileId and audienceBrief are accepted')
+        # Omitted mode remains the legacy transcript endpoint contract. The
+        # frontend sends explicit auto for the combined audio/video workflow.
         mode = data.get('mode', 'transcript')
-        if not isinstance(mode, str) or mode not in ('transcript', 'visual'):
-            raise _RouteError('mode must be transcript or visual')
+        if not isinstance(mode, str) or mode not in ('auto', 'transcript', 'visual'):
+            raise _RouteError('mode must be auto, transcript or visual')
         try:
             brief = validate_editing_brief(data.get('brief', ''))
             audience_brief = validate_audience_brief(data.get('audienceBrief'))

@@ -43,7 +43,7 @@ a **60-second** per-test timeout including teardown.
 | Legacy LLM transports/parser | `python -m pytest -q tests/test_llm_service.py` |
 | Visual schema/frame sampling | `python -m pytest -q tests/test_visual_analysis_service.py` |
 | Pipeline claims and stage errors | `python -m pytest -q tests/test_pipeline_routes.py` |
-| Chat and non-mutating advice | `python -m pytest -q tests/test_ai_edit_routes.py` |
+| Combined analysis and recommendation contracts | `python -m pytest -q tests/test_ai_edit_routes.py` |
 | Manual cuts | `python -m pytest -q tests/test_manual_cuts.py` |
 | Output/FFmpeg geometry | `python -m pytest -q tests/test_output_aspect_ratio.py tests/test_render_identity.py` |
 | AI Edit browser workflows | `npm run test:e2e -- tests/ai-edit.spec.ts` |

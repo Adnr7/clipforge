@@ -163,6 +163,79 @@ def test_optional_transcript_is_bounded_and_enables_real_caption_recommendation(
     assert actual['captionSettings']['enabled'] is True
 
 
+def test_combined_editor_uses_full_timed_audio_and_preserves_spoken_boundaries_between_frame_samples(pipeline, monkeypatch):
+    from backend.services.clip_selection_service import selection_metadata, editorial_score
+    pipeline['probe'].return_value['duration_sec'] = 1200
+    speech = {'segments': [{'start': 500, 'end': 520,
+                           'text': 'Use a clear customer problem. Then show the practical outcome.'}], 'words': []}
+    assessment = {key: 4 for key in ('audienceFit', 'hook', 'payoff', 'clarity', 'shareability')}
+    draft = {'start': 500, 'end': 520, 'score': editorial_score(assessment),
+             'hook': 'Show the customer outcome', 'rationale': 'A complete useful idea.',
+             'selection': selection_metadata('Founders', assessment, 'A practical pitch.', 'Customer pitch',
+                 {'basis': 'transcript', 'openingQuote': 'Use a clear customer problem.',
+                  'closingQuote': 'Then show the practical outcome.'})}
+    scout = Mock(return_value=[draft])
+    monkeypatch.setattr(llm_service, 'analyze_transcript', scout)
+    recommendation = copy.deepcopy(RECOMMENDATION)
+    recommendation['candidates'][0].update(start=500, end=520, evidenceFrame=4)
+    pipeline['post'].return_value = completion(recommendation)
+    result = analyze(pipeline, transcript_text=speech['segments'][0]['text'], transcript_data=speech)
+    assert result['analysisBasis'] == 'audio-and-sampled-frames'
+    assert [(item['start'], item['end']) for item in result['candidates']] == [(500, 520)]
+    assert result['candidates'][0]['selection']['evidence'] == draft['selection']['evidence']
+    assert scout.call_args.kwargs['transcript_data'] == speech
+    content = pipeline['post'].call_args.kwargs['json']['messages'][0]['content']
+    context = json.loads(content[0]['text'].split('\nContext: ')[1])
+    assert context['verifiedAudioCandidates'][0]['transcript'] == speech['segments'][0]['text']
+    assert 'final decision' in content[0]['text']
+
+
+def test_combined_editor_cannot_replace_audio_boundaries_with_invented_times(pipeline, monkeypatch):
+    speech = {'segments': [{'start': 0, 'end': 20, 'text': 'A complete spoken opening and payoff.'}], 'words': []}
+    monkeypatch.setattr(llm_service, 'analyze_transcript', Mock(return_value=[{'start': 0, 'end': 20}]))
+    with pytest.raises(ValueError, match='verified audio-transcript candidate'):
+        analyze(pipeline, transcript_text=speech['segments'][0]['text'], transcript_data=speech)
+
+
+@pytest.mark.parametrize('audio_only', [False, True])
+@pytest.mark.parametrize('model', ['deepseek-chat', 'deepseek-ai/DeepSeek-V4-Flash-0731',
+                                   'openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
+def test_transcript_fallback_keeps_verified_audio_recommendations_usable(pipeline, monkeypatch, audio_only, model):
+    from backend.services.clip_selection_service import selection_metadata
+    speech = {'segments': [{'start': 0, 'end': 20, 'text': 'A useful source opening and a complete outcome.'}], 'words': []}
+    assessment = {key: 4 for key in ('audienceFit', 'hook', 'payoff', 'clarity', 'shareability')}
+    draft = {'start': 0, 'end': 20, 'score': 80, 'hook': 'A useful idea', 'rationale': 'A complete payoff.',
+             'selection': selection_metadata('Learners', assessment, 'Useful guidance.', 'An idea',
+                 {'basis': 'transcript', 'openingQuote': 'A useful source opening', 'closingQuote': 'a complete outcome.'})}
+    if audio_only:
+        pipeline['probe'].return_value.update(has_video=False, width=0, height=0, video_codec='')
+    monkeypatch.setattr(llm_service, 'analyze_transcript', Mock(return_value=[draft]))
+    result = analyze(pipeline, profile={**PROFILE, 'model': model}, capability_fallback='transcript',
+                     transcript_text=speech['segments'][0]['text'], transcript_data=speech)
+    assert result['analysisBasis'] == 'audio-transcript'
+    assert result['candidates'] == [draft]
+    assert result['sampledFrameTimes'] == []
+    assert 'were not inspected' in result['contextNotice']
+    pipeline['ffmpeg'].assert_not_called()
+    pipeline['post'].assert_not_called()
+
+
+def test_image_rejection_reuses_scouted_audio_instead_of_repeating_analysis(pipeline, monkeypatch):
+    from backend.services.clip_selection_service import selection_metadata
+    speech = {'segments': [{'start': 0, 'end': 20, 'text': 'A clear explanation with a complete useful outcome.'}], 'words': []}
+    assessment = {key: 4 for key in ('audienceFit', 'hook', 'payoff', 'clarity', 'shareability')}
+    draft = {'start': 0, 'end': 20, 'score': 80, 'hook': 'A clear explanation', 'rationale': 'A complete outcome.',
+             'selection': selection_metadata('Learners', assessment, 'Useful guidance.', 'An idea',
+                 {'basis': 'transcript', 'openingQuote': 'A clear explanation', 'closingQuote': 'a complete useful outcome.'})}
+    scout = Mock(return_value=[draft]); monkeypatch.setattr(llm_service, 'analyze_transcript', scout)
+    pipeline['post'].return_value = http_response({'error': {'message': 'Images are unsupported by this model'}}, 400)
+    result = analyze(pipeline, transcript_text=speech['segments'][0]['text'], transcript_data=speech,
+                     capability_fallback='transcript')
+    assert result['analysisBasis'] == 'audio-transcript' and result['candidates'] == [draft]
+    scout.assert_called_once()
+    assert pipeline['post'].call_count == 1
+
+
 @pytest.mark.parametrize('provider', ['deepseek', 'groq', 'openrouter', 'ollama'])
 def test_known_incompatible_models_return_capability_error_before_sampling(pipeline, provider):
     with pytest.raises(visual.VisualCapabilityError, match='text-only'):

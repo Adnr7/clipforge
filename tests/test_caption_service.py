@@ -1,11 +1,13 @@
 """Caption regressions include pixel-for-pixel checks using real FFmpeg."""
 
+import os
 import shutil
 import subprocess
 
 import pytest
 
-from backend.services.caption_service import STYLES, build_drawtext_filters
+from backend.services.caption_service import STYLES, _escape_drawtext, build_drawtext_filters
+from backend.services.media_service import _windows_font_file
 
 
 @pytest.fixture(scope='module')
@@ -19,18 +21,35 @@ def ffmpeg():
     return executable
 
 
-def frame(ffmpeg, filters):
+def installed_font_filters(filters, font_family='default'):
+    """Use the application's Windows font routing for these direct FFmpeg calls.
+
+    Static Windows builds can crash in fontconfig even with a config file. Both
+    the inline-caption subject and independent textfile reference need the same
+    installed font; caption text and all other options are left untouched.
+    """
+    if os.name != 'nt' or not any(item.startswith('drawtext=') for item in filters):
+        return filters
+    font_file = _windows_font_file(font_family)
+    assert font_file is not None, 'Install a usable Windows caption font before running these tests'
+    option = ':fontfile=' + _escape_drawtext(font_file.replace('\\', '/'))
+    return [item + option if item.startswith('drawtext=') else item for item in filters]
+
+
+def frame(ffmpeg, filters, *, font_family='default', cwd=None):
+    filters = installed_font_filters(filters, font_family)
     result = subprocess.run([
         ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=960x240:r=1',
         '-vf', ','.join(filters), '-frames:v', '1', '-pix_fmt', 'rgb24',
         '-f', 'rawvideo', '-',
-    ], capture_output=True, timeout=30)
+    ], capture_output=True, timeout=30, cwd=cwd)
     assert result.returncode == 0, result.stderr.decode(errors='replace')
     # Older static fontconfig builds warn about newer system config elements;
     # retain FFmpeg errors (including drawtext's non-fatal "Stray %" error).
     errors = [line for line in result.stderr.decode(errors='replace').splitlines()
               if not line.startswith('Fontconfig warning:')]
     assert not errors, '\n'.join(errors)
+    assert len(result.stdout) == 960 * 240 * 3
     return result.stdout
 
 
@@ -51,11 +70,12 @@ def test_real_ffmpeg_matches_literal_textfile(ffmpeg, tmp_path, text, style_name
     textfile.write_text(text, encoding='utf-8')
     style = STYLES[style_name]
     reference = frame(ffmpeg, [
-        f"drawtext=textfile='{textfile}':expansion=none"
+        # A relative path avoids Windows drive-colon/backslash filter parsing.
+        'drawtext=textfile=caption.txt:expansion=none'
         f":fontsize={style['fontsize']}:fontcolor={style['fontcolor']}"
         f":borderw={style['borderw']}:bordercolor={style['bordercolor'] if style_name != 'minimal' else 'black'}"
         ':x=(w-text_w)/2:y=h-h/4',
-    ])
+    ], cwd=tmp_path)
     assert rendered == reference
     assert rendered != frame(ffmpeg, ['null']), 'Caption must actually be visible'
 
@@ -85,7 +105,7 @@ def test_real_font_families_change_pixels_and_default_is_legacy(ffmpeg):
     for family in ('sans', 'serif', 'mono', 'display'):
         filters = build_drawtext_filters(words, settings={'fontFamily': family})
         assert ':font=' in filters[0]
-        rendered.append(frame(ffmpeg, filters))
+        rendered.append(frame(ffmpeg, filters, font_family=family))
     assert len(set(rendered[:3])) == 3
     # Display uses a common Ubuntu family; fontconfig may substitute on other OSes.
     assert rendered[3] != frame(ffmpeg, ['null'])
@@ -124,6 +144,7 @@ def test_real_eight_word_chunk_wraps_inside_portrait_safe_area(ffmpeg):
         'backgroundEnabled': True, 'backgroundPadding': 32,
     })
     assert len(filters) == 1 and '\n' in filters[0]
+    filters = installed_font_filters(filters, 'display')
     result = subprocess.run([
         ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=1080x1920:r=1',
         '-vf', ','.join(filters), '-frames:v', '1', '-pix_fmt', 'gray', '-f', 'rawvideo', '-',

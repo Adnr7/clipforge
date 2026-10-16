@@ -6,4 +6,4 @@ cd "$(dirname "$0")"
 if [ -z "${VIRTUAL_ENV:-}" ]; then
   source .venv/bin/activate
 fi
-exec python main.py --web "$@"
+exec python -u main.py --web "$@"

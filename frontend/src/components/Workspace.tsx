@@ -62,7 +62,6 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
   const [captionOverride, setCaptionOverride] = useState<CaptionSettings | null>(null)
   const [filterOverride, setFilterOverride] = useState<VideoFilters | null>(null)
   const [outputOverride, setOutputOverride] = useState<OutputSettings | null>(null)
-  const [analysisMode, setAnalysisMode] = useState<'transcript' | 'visual'>('transcript')
   const [audienceBrief, setAudienceBrief] = useState<AudienceBrief>(() => loadAudienceBrief(projectId))
   useEffect(() => {
     try { localStorage.setItem(`clipforge.audience.v1.${projectId}`, JSON.stringify(audienceBrief)) } catch { /* Keep the current draft in memory. */ }
@@ -95,7 +94,6 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
   })()
   const videoFilters = filterOverride || detail?.project.videoFilters || contract?.videoFilters.defaults || fallbackRenderContract.videoFilters.defaults
   const outputSettings = outputOverride || detail?.project.outputSettings || contract?.output?.legacyDefaults || { mode: 'manual' as const, aspectRatio: '9:16' as const, fit: 'crop' as const, maxDimension: 1920 }
-  const effectiveAnalysisMode = hasSpeech ? analysisMode : 'visual'
   const captionStyle = captionSettings.preset
   const stage: PipelineStage = transcribing ? 'transcribing' : analyzing ? 'analyzing' : rendering ? 'rendering' : null
   const selected = visibleCandidates.filter((candidate) => candidate.selected)
@@ -179,7 +177,7 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     }
   })
   const transcribe = () => void run('transcribe', async () => { await api.transcribe(projectId); if (mounted.current) showToast('info', 'Transcription started') })
-  const analyze = () => void run('analyze', async () => { await aiEditApi.analyze(projectId, { mode: effectiveAnalysisMode, brief: '', audienceBrief }); if (mounted.current) showToast('info', effectiveAnalysisMode === 'visual' ? 'Audience-first visual analysis started' : 'Audience-first speech analysis started') })
+  const analyze = () => void run('analyze', async () => { await aiEditApi.analyze(projectId, { mode: 'auto', brief: '', audienceBrief }); if (mounted.current) showToast('info', 'Audio + visual AI analysis started') })
   const requestAnalysis = () => detail?.candidates.length ? setConfirmAnalysis(true) : analyze()
   const reviewSuggestions = async () => {
     if (suggestionsLoading) return
@@ -234,11 +232,11 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     {aiBusy && <div className="notice" role="status">AI automation is running. Keep this project open for the next steps; leaving stops future requests, while queued server jobs can finish.</div>}
     {error && <div className="notice notice-error" role="alert"><span>Live updates interrupted; retrying automatically. {error}</span><button className="text-button" onClick={() => void refresh()}>Retry now</button></div>}
     {isFailedJob(jobs.transcription.status) && <div className="notice notice-error" role="alert">Transcription failed: {jobs.transcription.error || 'Try transcribing again.'}</div>}
-    {isFailedJob(jobs.analysis.status) && <div className="notice notice-error" role="alert">Analysis failed: {jobs.analysis.error || 'Try finding clip candidates again.'}</div>}
+     {isFailedJob(jobs.analysis.status) && <div className="notice notice-error" role="alert"><span>Analysis failed: {jobs.analysis.error || 'Try finding clip candidates again.'}</span><button className="text-button" disabled={analyzing} onClick={requestAnalysis}>Retry analysis</button></div>}
     <div className="workspace-grid" ref={manualGrid} hidden={editMode !== 'manual'}>
       <section className="workspace-panel media-panel" aria-label="Source media"><MediaPlayer projectId={projectId} hasTranscript={!!transcript} onTimeUpdate={setCurrentTime} onTranscribe={transcribe} seekRequest={seekRequest} transcribing={transcribing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} mode={detail.project.transcription_mode} /></section>
-      <section className="workspace-panel transcript-panel" aria-label="Transcript"><TranscriptView transcript={transcript} hasSpeech={hasSpeech} currentTime={currentTime} onSeek={seek} onAnalyze={requestAnalysis} analysisMode={effectiveAnalysisMode} onAnalysisModeChange={setAnalysisMode} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} hasCandidates={visibleCandidates.length > 0} analyzing={analyzing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} invalid={!!detail.transcript && !transcript} /></section>
-      <section id="candidate-panel" className="workspace-panel candidates-panel" aria-label="Clip candidates"><CandidateList candidates={visibleCandidates} clips={detail.clips} sourceDuration={detail.project.source_duration || 0} preferredClipIds={renderArtifactIds} onCreateManualCut={createManualCut} onRender={render} onSeek={seek} onSelectToggle={(candidate, checked) => void toggleSelection(candidate, checked)} selectionBusy={selectionBusy} renderBusy={rendering} disabled={aiBusy || processing || !!pending} captionStyle={captionStyle} onOpenControls={() => setControlsOpen(true)} /></section>
+      <section className="workspace-panel transcript-panel" aria-label="Transcript"><TranscriptView transcript={transcript} hasSpeech={hasSpeech} currentTime={currentTime} onSeek={seek} onAnalyze={requestAnalysis} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} hasCandidates={visibleCandidates.length > 0} analyzing={analyzing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} invalid={!!detail.transcript && !transcript} /></section>
+       <section id="candidate-panel" className="workspace-panel candidates-panel" aria-label="Clip candidates"><CandidateList candidates={visibleCandidates} clips={detail.clips} sourceDuration={detail.project.source_duration || 0} preferredClipIds={renderArtifactIds} onCreateManualCut={createManualCut} onRender={render} onSeek={seek} onSelectToggle={(candidate, checked) => void toggleSelection(candidate, checked)} selectionBusy={selectionBusy} renderBusy={rendering} disabled={aiBusy || processing || !!pending} captionStyle={captionStyle} onOpenControls={() => setControlsOpen(true)} analysisFailed={isFailedJob(jobs.analysis.status)} analysisError={jobs.analysis.error} onRetryAnalysis={requestAnalysis} /></section>
     </div>
     {aiVisited && <AiEditMode detail={detail} active={editMode === 'ai'} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} busy={processing || rendering || !!pending || selectionBusy || savingControls || controlsOpen || suggestionsLoading} captionSettings={captionSettings} videoFilters={videoFilters} outputSettings={outputSettings} onBusyChange={setAiBusy} onRefresh={refresh} onSelectionSaved={() => setSelectionOverride(null)} onRenderQueued={(candidateId, clipId) => { setRenderArtifactIds((previous) => ({ ...previous, [candidateId]: clipId })); trackClips([clipId]) }} onManual={() => setEditMode('manual')} onOpenControls={() => setControlsOpen(true)} />}
     {confirmAnalysis && <Modal title="Replace clip candidates?" onClose={() => setConfirmAnalysis(false)} closeOnBackdrop={false}>

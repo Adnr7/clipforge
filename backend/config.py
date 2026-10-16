@@ -1,6 +1,179 @@
 import os
 import shutil
+import subprocess
+from pathlib import Path
 from flask import current_app, has_app_context
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_FFMPEG_TOOL_NAMES = ('ffmpeg', 'ffprobe')
+
+
+def _candidate_ffmpeg_bin_dirs():
+    """Return native Linux FFmpeg locations, ordered from most specific.
+
+    Windows directories can be present in WSL's inherited PATH.  They are
+    deliberately not considered here: a Windows executable cannot reliably
+    consume paths in the WSL filesystem.  The setup helper installs static
+    Linux tools under the user's application-tools directory. These locations also
+    make existing user-space apt extractions usable when their libraries are
+    available.
+    """
+    candidates = []
+
+    def add(path):
+        path = Path(path).expanduser().absolute()
+        if path not in candidates:
+            candidates.append(path)
+
+    configured = os.environ.get('CLIPFORGE_FFMPEG_DIR')
+    if configured:
+        add(configured)
+
+    # Keep a normal installation on PATH first.  If it is a user-space
+    # extraction, _library_dirs_for() below supplies its private libraries.
+    for name in _FFMPEG_TOOL_NAMES:
+        found = shutil.which(name)
+        if found and not found.lower().endswith('.exe'):
+            add(Path(found).parent)
+
+    for path in (
+        _PROJECT_ROOT / '.runtime' / 'ffmpeg' / 'bin',
+        _PROJECT_ROOT / 'runtime' / 'ffmpeg' / 'bin',
+        Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg' / 'bin',
+        Path.home() / '.local' / 'bin',
+        Path.home() / '.local' / 'ffmpeg-root' / 'usr' / 'bin',
+        Path.home() / '.local' / 'ffmpeg' / 'usr' / 'bin',
+    ):
+        add(path)
+
+    # setup_ffmpeg_wsl.py keeps versions side-by-side so an update can be
+    # atomic.  Include all such installs, newest path first by name.
+    versioned = Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg'
+    try:
+        for path in sorted(versioned.glob('*/bin'), reverse=True):
+            add(path)
+    except OSError:
+        pass
+    return candidates
+
+
+def _library_dirs_for(bin_dir):
+    """Find private library directories next to a user-space extraction."""
+    bin_dir = Path(bin_dir).expanduser().resolve()
+    if bin_dir in (Path('/usr/bin'), Path('/bin').resolve(), Path('/usr/local/bin')):
+        return []  # The loader already searches system libraries.
+    roots = [bin_dir.parent, bin_dir.parent.parent]
+    candidates = []
+    for root in roots:
+        for path in (root / 'lib', root / 'lib64', root / 'lib' / 'x86_64-linux-gnu'):
+            if path.is_dir() and path not in candidates:
+                candidates.append(path)
+    return candidates
+
+
+def _runtime_environment(bin_dir):
+    env = os.environ.copy()
+    library_dirs = _library_dirs_for(bin_dir)
+    if library_dirs:
+        existing = [item for item in env.get('LD_LIBRARY_PATH', '').split(':') if item]
+        entries = dict.fromkeys([*(str(path) for path in library_dirs), *existing])
+        env['LD_LIBRARY_PATH'] = ':'.join(entries)
+    return env
+
+
+def _usable_executable(path, env=None):
+    path = Path(path)
+    if not path.is_file() or not os.access(path, os.X_OK):
+        return False
+    try:
+        if os.name != 'nt':
+            if path.resolve().suffix.lower() == '.exe':
+                return False
+            with path.open('rb') as executable:
+                if executable.read(2) == b'MZ':
+                    return False
+        result = subprocess.run(
+            [str(path), '-version'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            errors='replace',
+            env=env,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    name = path.name.removesuffix('.exe')
+    return result.returncode == 0 and result.stdout.startswith(f'{name} version ')
+
+
+def _render_capable_ffmpeg(path, env=None):
+    """Require the filters and encoder used by ClipForge's render path."""
+    try:
+        filters = subprocess.run(
+            [str(path), '-hide_banner', '-filters'],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
+            check=False,
+        )
+        encoders = subprocess.run(
+            [str(path), '-hide_banner', '-encoders'],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return (
+        filters.returncode == 0
+        and 'drawtext' in filters.stdout
+        and encoders.returncode == 0
+        and 'libx264' in encoders.stdout
+    )
+
+
+def configure_ffmpeg_runtime(candidate_dirs=None):
+    """Expose a working native FFmpeg pair to literal subprocess commands.
+
+    Media services intentionally invoke ``ffmpeg`` and ``ffprobe`` by name so
+    their commands remain portable.  This function makes that contract hold
+    for WSL by selecting one directory containing both *working* Linux
+    executables and prepending it to this process's environment.  It also
+    supplies LD_LIBRARY_PATH for user-space apt extractions.  No Windows
+    ``.exe`` is ever selected.
+
+    Returns True when both commands can execute, otherwise False.  Failure is
+    non-fatal so the status endpoint can explain an incomplete setup.
+    """
+    if os.name == 'nt':
+        return all(shutil.which(name) for name in _FFMPEG_TOOL_NAMES)
+
+    directories = list(candidate_dirs) if candidate_dirs is not None else _candidate_ffmpeg_bin_dirs()
+    for directory in directories:
+        directory = Path(directory).expanduser().absolute()
+        ffmpeg = directory / 'ffmpeg'
+        ffprobe = directory / 'ffprobe'
+        env = _runtime_environment(directory)
+        if not (_usable_executable(ffmpeg, env)
+                and _render_capable_ffmpeg(ffmpeg, env)
+                and _usable_executable(ffprobe, env)):
+            continue
+
+        path_entries = [str(directory)]
+        path_entries.extend(item for item in os.environ.get('PATH', '').split(os.pathsep)
+                            if item and Path(item).expanduser() != directory)
+        os.environ['PATH'] = os.pathsep.join(path_entries)
+        if 'LD_LIBRARY_PATH' in env:
+            os.environ['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH']
+        return True
+    return False
+
 
 class Config:
     @staticmethod
@@ -19,11 +192,16 @@ class Config:
 
     @staticmethod
     def has_ffmpeg():
-        return shutil.which('ffmpeg') is not None
+        configure_ffmpeg_runtime()
+        path = shutil.which('ffmpeg')
+        env = os.environ.copy()
+        return bool(path and _usable_executable(path, env) and _render_capable_ffmpeg(path, env))
 
     @staticmethod
     def has_ffprobe():
-        return shutil.which('ffprobe') is not None
+        configure_ffmpeg_runtime()
+        path = shutil.which('ffprobe')
+        return bool(path and _usable_executable(path, os.environ.copy()))
 
     @staticmethod
     def has_ytdlp():
@@ -47,3 +225,9 @@ class Config:
             'llmProvider': Config.get_llm_provider(),
             'hasYtdlp': Config.has_ytdlp(),
         }
+
+
+# Configure as soon as backend modules are imported.  main.py calls this once
+# more explicitly before creating the Flask app, while alternate Flask entry
+# points and test clients get the same subprocess environment.
+configure_ffmpeg_runtime()

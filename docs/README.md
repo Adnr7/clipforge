@@ -12,7 +12,7 @@
 | Understand services, storage, job claims, and rendering | [Architecture](architecture.md) |
 | Integrate with the local backend | [API reference](api.md) |
 | Understand how audience-first highlights are selected | [Audience selection](audience-selection.md) |
-| Change project chat or the reviewed automation runner | [AI Edit integration](ai-edit-mode.md) |
+| Change combined AI selection or the reviewed automation runner | [AI Edit integration](ai-edit-mode.md) |
 | Run focused tests, inspect traces, or regenerate screenshots | [Testing](testing.md) |
 | Review themes, mobile layouts, and accessibility | [UI review](ui-review.md) |
 | Resolve setup, model, or media problems | [Troubleshooting](troubleshooting.md) |
