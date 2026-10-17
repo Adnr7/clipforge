@@ -283,15 +283,23 @@ def get_media_runtime_status():
 
 def configure_ytdlp_runtime():
     """Make a venv-installed yt-dlp executable visible to child processes."""
-    executable_dir = Path(sys.executable).resolve().parent
-    candidate = executable_dir / ('yt-dlp.exe' if os.name == 'nt' else 'yt-dlp')
-    if candidate.is_file() and os.access(candidate, os.X_OK):
+    candidate = _ytdlp_executable()
+    if candidate is not None:
+        executable_dir = candidate.parent
         entries = [str(executable_dir)]
         entries.extend(item for item in os.environ.get('PATH', '').split(os.pathsep)
                        if item and Path(item).expanduser() != executable_dir)
         os.environ['PATH'] = os.pathsep.join(entries)
         return True
     return bool(shutil.which('yt-dlp'))
+
+
+def _ytdlp_executable():
+    executable_dir = Path(sys.executable).resolve().parent
+    candidate = executable_dir / ('yt-dlp.exe' if os.name == 'nt' else 'yt-dlp')
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return candidate
+    return None
 
 
 def ensure_ytdlp_runtime():
@@ -342,8 +350,11 @@ class Config:
 
     @staticmethod
     def has_ytdlp():
-        configure_ytdlp_runtime()
-        return bool(shutil.which('yt-dlp') or importlib.util.find_spec('yt_dlp') is not None)
+        # Status checks must not mutate the process environment.  Startup calls
+        # ensure_ytdlp_runtime(), which performs the separate PATH setup needed
+        # by child processes before the server accepts work.
+        return bool(_ytdlp_executable() or shutil.which('yt-dlp')
+                    or importlib.util.find_spec('yt_dlp') is not None)
 
     @staticmethod
     def get_env_status():

@@ -202,6 +202,24 @@ def test_ytdlp_runtime_prefers_the_active_python_environment_script(tmp_path, mo
     assert config.Config.has_ytdlp()
 
 
+def test_environment_status_does_not_rewrite_path_for_ytdlp_discovery(tmp_path, monkeypatch):
+    executable = tmp_path / 'venv' / 'bin' / 'python'
+    executable.parent.mkdir(parents=True)
+    executable.write_text('')
+    ytdlp = executable.parent / 'yt-dlp'
+    ytdlp.write_text('#!/bin/sh\n')
+    ytdlp.chmod(0o755)
+    monkeypatch.setattr(config.sys, 'executable', str(executable))
+    monkeypatch.setattr(config.importlib.util, 'find_spec', lambda _: None)
+    monkeypatch.setattr(config, '_candidate_ffmpeg_bin_dirs', lambda: [])
+    monkeypatch.setenv('PATH', '/path-that-does-not-exist')
+
+    status = config.Config.get_env_status()
+
+    assert status['hasYtdlp']
+    assert os.environ['PATH'] == '/path-that-does-not-exist'
+
+
 def test_ensure_ytdlp_runtime_installs_the_declared_dependency_when_missing(monkeypatch):
     monkeypatch.setattr(config, 'configure_ytdlp_runtime', Mock(side_effect=[False, True]))
     monkeypatch.setattr(config.importlib.util, 'find_spec', Mock(return_value=None))
