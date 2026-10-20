@@ -6,6 +6,7 @@ venv/
 .env.*
 !.env.example
 frontend/dist/
+/.runtime/
 *.db
 *.db-wal
 *.db-shm

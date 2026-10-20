@@ -45,6 +45,7 @@ a **60-second** per-test timeout including teardown.
 | Pipeline claims and stage errors | `python -m pytest -q tests/test_pipeline_routes.py` |
 | Combined analysis and recommendation contracts | `python -m pytest -q tests/test_ai_edit_routes.py` |
 | Manual cuts | `python -m pytest -q tests/test_manual_cuts.py` |
+| Cross-platform media runtime | `python -m pytest -q tests/test_ffmpeg_runtime.py tests/test_ffmpeg_windows.py` |
 | Output/FFmpeg geometry | `python -m pytest -q tests/test_output_aspect_ratio.py tests/test_render_identity.py` |
 | AI Edit browser workflows | `npm run test:e2e -- tests/ai-edit.spec.ts` |
 | Manual/settings/themes | `npm run test:e2e -- tests/workflows.spec.ts` |
@@ -131,6 +132,7 @@ consistently understand a new subject or audience.
 | Job | Environment | Checks |
 | --- | --- | --- |
 | Backend | Ubuntu 24.04, Python 3.10 and 3.12 | Install FFmpeg/fonts and runtime/dev dependencies; full pytest |
+| Windows runtime | Windows, Python 3.12 | Windows `.exe` discovery, managed bootstrap path, status contract |
 | Frontend | Ubuntu 24.04, Node 22 | `npm ci`, build, Oxlint, Chromium install, full Playwright |
 
 CI does not install Whisper weights or run a paid provider, native GUI, or

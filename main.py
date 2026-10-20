@@ -17,8 +17,8 @@ def main():
     port = int(os.environ.get('CLIPFORGE_PORT', '5174'))
     app = create_app()
     # Re-resolve after create_app loads the project's and data directory's .env.
-    # On supported Linux/WSL systems this performs the first-run, user-space
-    # bootstrap before the server accepts import/render requests.
+    # On supported Linux/WSL and native Windows systems this performs the
+    # first-run, user-space bootstrap before accepting import/render requests.
     media_runtime = ensure_media_runtime()
     ytdlp_ready = ensure_ytdlp_runtime()
     if media_runtime['state'] == 'ready':

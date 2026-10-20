@@ -41,6 +41,26 @@ jobs:
       - name: Run backend tests
         run: python -B -m pytest -q --tb=short tests
 
+  windows-runtime:
+    name: Windows / media runtime discovery
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.lock
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.lock
+      - name: Test Windows runtime setup and status
+        run: python -B -m pytest -q --tb=short tests/test_ffmpeg_windows.py
+
   frontend:
     name: Frontend / build, lint, browser tests
     runs-on: ubuntu-24.04
