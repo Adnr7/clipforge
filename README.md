@@ -151,6 +151,35 @@ bootstraps a verified user-space FFmpeg/FFprobe runtime when native tools are no
 already available. `make setup` installs the declared Python and frontend
 dependencies locally; it does not install anything globally.
 
+### Reproducible Windows PowerShell setup
+
+The `Makefile` uses POSIX paths such as `.venv/bin/python` and is not a native
+Windows command. On Windows, use the included PowerShell entrypoint instead:
+
+```powershell
+git clone https://github.com/Adnr7/clipforge.git
+Set-Location .\clipforge
+
+# Only needed if this PowerShell session blocks local scripts.
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+.\scripts\setup_windows.ps1 -Task setup
+.\scripts\setup_windows.ps1 -Task build
+.\scripts\setup_windows.ps1 -Task test
+.\scripts\setup_windows.ps1 -Task run
+```
+
+Or run the complete setup, build, test, and server flow with:
+
+```powershell
+.\scripts\setup_windows.ps1 -Task all
+```
+
+The Windows script expects the Python Launcher with Python **3.12**, Node.js/npm,
+and PowerShell. Setup creates `.venv`, installs the locked dependencies, builds
+the frontend, and installs the pinned native Windows FFmpeg/FFprobe runtime under
+`%LOCALAPPDATA%\ClipForge\ffmpeg\`.
+
 The same project can run in Docker without a host Python or Node installation:
 
 ```bash

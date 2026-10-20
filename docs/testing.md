@@ -22,6 +22,14 @@ make setup
 make test
 ```
 
+On native Windows, use the PowerShell setup entrypoint instead of `make`:
+
+```powershell
+.\scripts\setup_windows.ps1 -Task setup
+.\scripts\setup_windows.ps1 -Task build
+.\scripts\setup_windows.ps1 -Task test
+```
+
 ```bash
 # frontend/
 npm ci
