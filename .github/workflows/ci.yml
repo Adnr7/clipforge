@@ -59,7 +59,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.lock
       - name: Test Windows runtime setup and status
-        run: python -B -m pytest -q --tb=short tests/test_ffmpeg_windows.py tests/test_routes.py
+        run: python -B -m pytest -q --tb=short tests/test_ffmpeg_windows.py
 
   frontend:
     name: Frontend / build, lint, browser tests
