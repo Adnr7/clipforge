@@ -21,18 +21,22 @@ the backend port.
 
 ## FFmpeg or FFprobe is missing
 
-On x86_64 Linux/WSL, the normal `python main.py --web` startup attempts to
-install a pinned, checksum-verified user-space runtime automatically. Restart
-ClipForge to retry a failed or interrupted download. The managed copy is stored
-under `~/.local/share/clipforge/ffmpeg/` and does not change the interactive
-shell's `PATH`.
+On x86_64 Linux/WSL and native x86_64 Windows, the normal `python main.py --web`
+startup attempts to install a pinned, checksum-verified user-space runtime
+automatically. Restart ClipForge to retry a failed or interrupted download. The
+managed copy is stored under `~/.local/share/clipforge/ffmpeg/` on Linux/WSL or
+`%LOCALAPPDATA%\ClipForge\ffmpeg\` on Windows, and does not change the
+interactive shell's `PATH`.
 
 The dashboard and Settings → Environment show whether setup succeeded and the
 reason it failed. Run `ffmpeg -version` and `ffprobe -version` in the same
 terminal used to start ClipForge when diagnosing a manually configured runtime.
-Windows, macOS, ARM Linux, and other unsupported platforms must provide native
-FFmpeg and FFprobe on `PATH`; a Git clone cannot install system binaries or
-bypass OS permissions on every platform.
+If automatic Windows setup is unavailable because the machine is offline, uses
+Windows ARM, or is managed by an application-download policy, provide native
+FFmpeg and FFprobe on `PATH` or set `CLIPFORGE_FFMPEG_DIR` to their `bin`
+directory. macOS, ARM Linux, and other unsupported platforms must provide native
+tools as well; a Git clone cannot install system binaries or bypass OS
+permissions on every platform.
 
 Caption rendering requires a build with `drawtext` and usable fonts. Video
 encoding requires `libx264`. On Ubuntu/Debian, install `ffmpeg` and

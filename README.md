@@ -170,7 +170,7 @@ not put credentials in the image or repository.
 | --- | --- | --- |
 | Python | **3.12** for the pinned clean-build path | Backend and desktop launcher |
 | Node.js | **22.12.0** for the pinned clean-build path | Building the interface and browser tests |
-| FFmpeg + FFprobe | Automatically bootstrapped on x86_64 Linux/WSL; native tools required on Windows/macOS/other architectures | Probe, previews, captions, and export |
+| FFmpeg + FFprobe | Automatically bootstrapped on x86_64 Linux/WSL and native x86_64 Windows; native tools required on macOS/other architectures | Probe, previews, captions, and export |
 | Native WebView | Optional, platform-specific | Desktop window; browser mode does not need it |
 
 The `make setup` flow above is the preferred clean-machine path. Manual setup is
@@ -184,6 +184,19 @@ On **x86_64 Linux or WSL**, ClipForge automatically downloads a pinned,
 SHA-256-verified user-space FFmpeg/FFprobe runtime the first time you start the
 backend. It is installed under `~/.local/share/clipforge/ffmpeg/` and reused on
 future launches. No `sudo` or interactive package-manager step is required.
+
+On **native x86_64 Windows**, ClipForge performs the same verified setup using
+native `.exe` tools. The files are stored under
+`%LOCALAPPDATA%\ClipForge\ffmpeg\` and are used by the backend without changing
+the machine-wide PATH or requiring administrator access. The first launch needs
+network access; restart ClipForge after a failed or interrupted download.
+
+To preinstall the Windows runtime before opening the app, run this from
+PowerShell at the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\setup_ffmpeg_windows.py
+```
 
 The first launch needs network access. The runtime includes the `drawtext`
 filter and `libx264`; captions also need usable fonts installed in the Linux
@@ -206,13 +219,15 @@ sudo apt install ffmpeg fonts-dejavu-core python3-venv
 brew install ffmpeg
 ```
 
-On Windows, install an FFmpeg build containing FFprobe, add its `bin` directory
-to `PATH`, and open a new terminal. Verify both `ffmpeg -version` and
-`ffprobe -version`.
+On Windows, the automatic setup above is preferred. If your machine is offline,
+uses Windows ARM, or your organization blocks application downloads, install an
+FFmpeg build containing FFprobe, `drawtext`, and `libx264`, then either add its
+`bin` directory to `PATH` or set `CLIPFORGE_FFMPEG_DIR` to that directory before
+starting ClipForge. Verify both `ffmpeg -version` and `ffprobe -version`.
 
-Windows, macOS, ARM Linux, and other unsupported platforms currently require a
-native FFmpeg/FFprobe installation. A Git clone cannot install system binaries
-or bypass OS permissions on every platform; ClipForge detects native tools and
+macOS, ARM Linux, Windows ARM, and other unsupported platforms require a native
+FFmpeg/FFprobe installation. A Git clone cannot install system binaries or
+bypass OS permissions on every platform; ClipForge detects native tools and
 shows platform-specific guidance when they are unavailable.
 
 </details>

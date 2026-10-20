@@ -21,15 +21,49 @@ _MEDIA_RUNTIME = {
 _LOGGER = logging.getLogger(__name__)
 
 
+def _is_windows():
+    return os.name == 'nt'
+
+
+def _managed_ffmpeg_root():
+    """Return the per-user directory used for downloaded media tools."""
+    if _is_windows():
+        local_app_data = os.environ.get('LOCALAPPDATA')
+        if local_app_data:
+            return Path(local_app_data) / 'ClipForge' / 'ffmpeg'
+        return Path.home() / 'AppData' / 'Local' / 'ClipForge' / 'ffmpeg'
+    return Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg'
+
+
+def _tool_names(name):
+    """Return executable spellings accepted by the current operating system."""
+    return (f'{name}.exe', name) if _is_windows() else (name,)
+
+
+def _which_tool(name):
+    for executable in _tool_names(name):
+        found = shutil.which(executable)
+        if found:
+            return found
+    return None
+
+
+def _tool_path(directory, name):
+    directory = Path(directory)
+    for executable in _tool_names(name):
+        path = directory / executable
+        if path.is_file():
+            return path
+    return directory / _tool_names(name)[0]
+
+
 def _candidate_ffmpeg_bin_dirs():
-    """Return native Linux FFmpeg locations, ordered from most specific.
+    """Return native FFmpeg locations, ordered from most specific.
 
     Windows directories can be present in WSL's inherited PATH.  They are
     deliberately not considered here: a Windows executable cannot reliably
-    consume paths in the WSL filesystem.  The setup helper installs static
-    Linux tools under the user's application-tools directory. These locations also
-    make existing user-space apt extractions usable when their libraries are
-    available.
+    consume paths in the WSL filesystem. On native Windows, the same discovery
+    logic accepts ``.exe`` tools and the per-user managed install.
     """
     candidates = []
 
@@ -45,23 +79,32 @@ def _candidate_ffmpeg_bin_dirs():
     # Keep a normal installation on PATH first.  If it is a user-space
     # extraction, _library_dirs_for() below supplies its private libraries.
     for name in _FFMPEG_TOOL_NAMES:
-        found = shutil.which(name)
-        if found and not found.lower().endswith('.exe'):
+        found = _which_tool(name)
+        if found and (_is_windows() or not found.lower().endswith('.exe')):
             add(Path(found).parent)
 
-    for path in (
+    managed_root = _managed_ffmpeg_root()
+    paths = [
         _PROJECT_ROOT / '.runtime' / 'ffmpeg' / 'bin',
         _PROJECT_ROOT / 'runtime' / 'ffmpeg' / 'bin',
-        Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg' / 'bin',
-        Path.home() / '.local' / 'bin',
-        Path.home() / '.local' / 'ffmpeg-root' / 'usr' / 'bin',
-        Path.home() / '.local' / 'ffmpeg' / 'usr' / 'bin',
-    ):
+        managed_root / 'bin',
+    ]
+    if _is_windows():
+        paths.extend([
+            Path.home() / 'AppData' / 'Local' / 'ClipForge' / 'ffmpeg' / 'bin',
+        ])
+    else:
+        paths.extend([
+            Path.home() / '.local' / 'bin',
+            Path.home() / '.local' / 'ffmpeg-root' / 'usr' / 'bin',
+            Path.home() / '.local' / 'ffmpeg' / 'usr' / 'bin',
+        ])
+    for path in paths:
         add(path)
 
-    # setup_ffmpeg_wsl.py keeps versions side-by-side so an update can be
-    # atomic.  Include all such installs, newest path first by name.
-    versioned = Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg'
+    # The platform installers keep versions side-by-side so an update can be
+    # atomic. Include all such installs, newest path first by name.
+    versioned = managed_root
     try:
         for path in sorted(versioned.glob('*/bin'), reverse=True):
             add(path)
@@ -72,6 +115,8 @@ def _candidate_ffmpeg_bin_dirs():
 
 def _library_dirs_for(bin_dir):
     """Find private library directories next to a user-space extraction."""
+    if _is_windows():
+        return []
     bin_dir = Path(bin_dir).expanduser().resolve()
     if bin_dir in (Path('/usr/bin'), Path('/bin').resolve(), Path('/usr/local/bin')):
         return []  # The loader already searches system libraries.
@@ -96,10 +141,10 @@ def _runtime_environment(bin_dir):
 
 def _usable_executable(path, env=None):
     path = Path(path)
-    if not path.is_file() or not os.access(path, os.X_OK):
+    if not path.is_file() or (not _is_windows() and not os.access(path, os.X_OK)):
         return False
     try:
-        if os.name != 'nt':
+        if not _is_windows():
             if path.resolve().suffix.lower() == '.exe':
                 return False
             with path.open('rb') as executable:
@@ -117,8 +162,8 @@ def _usable_executable(path, env=None):
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    name = path.name.removesuffix('.exe')
-    return result.returncode == 0 and result.stdout.startswith(f'{name} version ')
+    name = path.stem
+    return result.returncode == 0 and result.stdout.casefold().startswith(f'{name.casefold()} version ')
 
 
 def _render_capable_ffmpeg(path, env=None):
@@ -154,25 +199,20 @@ def configure_ffmpeg_runtime(candidate_dirs=None):
     """Expose a working native FFmpeg pair to literal subprocess commands.
 
     Media services intentionally invoke ``ffmpeg`` and ``ffprobe`` by name so
-    their commands remain portable.  This function makes that contract hold
-    for WSL by selecting one directory containing both *working* Linux
-    executables and prepending it to this process's environment.  It also
-    supplies LD_LIBRARY_PATH for user-space apt extractions.  No Windows
-    ``.exe`` is ever selected.
+    their commands remain portable. This function makes that contract hold on
+    Linux, WSL, and native Windows by selecting one directory containing both
+    working executables and prepending it to this process's environment. It
+    also supplies LD_LIBRARY_PATH for user-space Linux extractions.
 
     Returns True when both commands can execute, otherwise False.  Failure is
     non-fatal so the status endpoint can explain an incomplete setup.
     """
     global _ACTIVE_FFMPEG_DIR
-    if os.name == 'nt':
-        _ACTIVE_FFMPEG_DIR = None
-        return all(shutil.which(name) for name in _FFMPEG_TOOL_NAMES)
-
     directories = list(candidate_dirs) if candidate_dirs is not None else _candidate_ffmpeg_bin_dirs()
     for directory in directories:
         directory = Path(directory).expanduser().absolute()
-        ffmpeg = directory / 'ffmpeg'
-        ffprobe = directory / 'ffprobe'
+        ffmpeg = _tool_path(directory, 'ffmpeg')
+        ffprobe = _tool_path(directory, 'ffprobe')
         env = _runtime_environment(directory)
         if not (_usable_executable(ffmpeg, env)
                 and _render_capable_ffmpeg(ffmpeg, env)
@@ -198,7 +238,7 @@ def _runtime_source(directory):
     configured = os.environ.get('CLIPFORGE_FFMPEG_DIR')
     if configured and directory == Path(configured).expanduser().absolute():
         return 'configured'
-    managed_root = Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg'
+    managed_root = _managed_ffmpeg_root()
     if directory == managed_root or managed_root in directory.parents:
         return 'managed'
     return 'system'
@@ -216,18 +256,18 @@ def _set_media_runtime(state, message, source=None):
 def _runtime_is_ready():
     if not configure_ffmpeg_runtime():
         return False
-    # POSIX discovery validates drawtext/libx264; the Windows branch preserves
-    # the existing PATH contract, so run the full capability check there too.
-    return not (os.name == 'nt') or (Config.has_ffmpeg() and Config.has_ffprobe())
+    # Discovery validates capabilities on POSIX. Windows also runs the public
+    # checks because native executable discovery uses the .exe spelling.
+    return not _is_windows() or (Config.has_ffmpeg() and Config.has_ffprobe())
 
 
 def ensure_media_runtime():
     """Make media tools ready before the server accepts user work.
 
-    Existing native tools are always preferred. On x86_64 Linux/WSL, a missing
-    runtime is filled with the repository's pinned, checksum-verified user-space
-    installer. Other platforms remain usable for manually installed native
-    tools, but never receive an incompatible Linux download.
+    Existing native tools are always preferred. On x86_64 Linux/WSL and native
+    x86_64 Windows, a missing runtime is filled with a pinned,
+    checksum-verified user-space installer. Other platforms remain usable for
+    manually installed native tools, but never receive an incompatible download.
     """
     if _runtime_is_ready():
         source = _runtime_source(_ACTIVE_FFMPEG_DIR)
@@ -244,37 +284,68 @@ def ensure_media_runtime():
             'configured',
         )
         return get_media_runtime_status()
-    if system != 'linux' or machine not in {'x86_64', 'amd64'}:
+    if system == 'windows' and machine in {'x86_64', 'amd64'}:
+        try:
+            from scripts.setup_ffmpeg_windows import install
+
+            install(_managed_ffmpeg_root())
+            if _runtime_is_ready():
+                _set_media_runtime(
+                    'ready',
+                    'ClipForge installed a verified FFmpeg/FFprobe runtime in your user directory.',
+                    'managed',
+                )
+                return get_media_runtime_status()
+            raise RuntimeError('The installed tools did not pass the runtime capability check.')
+        except Exception:
+            _set_media_runtime(
+                'failed',
+                'Automatic Windows media setup could not finish. Check your network and permissions, '
+                'or install native FFmpeg/FFprobe manually, then restart ClipForge.',
+            )
+            _LOGGER.exception('Automatic Windows media runtime setup failed')
+            return get_media_runtime_status()
+
+    if system == 'linux' and machine in {'x86_64', 'amd64'}:
+        try:
+            from scripts.setup_ffmpeg_wsl import install
+
+            install(_managed_ffmpeg_root())
+            if _runtime_is_ready():
+                _set_media_runtime(
+                    'ready',
+                    'ClipForge installed a verified FFmpeg/FFprobe runtime in your user directory.',
+                    'managed',
+                )
+                return get_media_runtime_status()
+            raise RuntimeError('The installed tools did not pass the runtime capability check.')
+        except Exception:
+            _set_media_runtime(
+                'failed',
+                'Automatic media setup could not finish. Check your network and permissions, '
+                'or install native FFmpeg/FFprobe manually, then restart ClipForge.',
+            )
+            # Keep the detailed cause in the backend log without exposing filesystem
+            # details through the public status response.
+            _LOGGER.exception('Automatic media runtime setup failed')
+            return get_media_runtime_status()
+
+    if system == 'windows':
         _set_media_runtime(
             'unsupported',
-            'Automatic media setup is available for x86_64 Linux/WSL. Install '
-            'native FFmpeg and FFprobe with drawtext, libx264, and usable fonts '
-            'then restart ClipForge.',
+            'Automatic Windows media setup supports x86_64 only. Install native '
+            'FFmpeg and FFprobe with drawtext, libx264, and usable fonts, or use '
+            'an x86_64 Windows build, then restart ClipForge.',
         )
         return get_media_runtime_status()
 
-    try:
-        from scripts.setup_ffmpeg_wsl import install
-
-        install(Path.home() / '.local' / 'share' / 'clipforge' / 'ffmpeg')
-        if _runtime_is_ready():
-            _set_media_runtime(
-                'ready',
-                'ClipForge installed a verified FFmpeg/FFprobe runtime in your user directory.',
-                'managed',
-            )
-            return get_media_runtime_status()
-        raise RuntimeError('The installed tools did not pass the runtime capability check.')
-    except Exception:
-        _set_media_runtime(
-            'failed',
-            'Automatic media setup could not finish. Check your network and permissions, '
-            'or install native FFmpeg/FFprobe manually, then restart ClipForge.',
-        )
-        # Keep the detailed cause in the backend log without exposing filesystem
-        # details through the public status response.
-        _LOGGER.exception('Automatic media runtime setup failed')
-        return get_media_runtime_status()
+    _set_media_runtime(
+        'unsupported',
+        'Automatic media setup is available for x86_64 Linux/WSL and Windows. '
+        'Install native FFmpeg and FFprobe with drawtext, libx264, and usable '
+        'fonts, then restart ClipForge.',
+    )
+    return get_media_runtime_status()
 
 
 def get_media_runtime_status():
@@ -296,7 +367,7 @@ def configure_ytdlp_runtime():
 
 def _ytdlp_executable():
     executable_dir = Path(sys.executable).resolve().parent
-    candidate = executable_dir / ('yt-dlp.exe' if os.name == 'nt' else 'yt-dlp')
+    candidate = executable_dir / ('yt-dlp.exe' if _is_windows() else 'yt-dlp')
     if candidate.is_file() and os.access(candidate, os.X_OK):
         return candidate
     return None
@@ -338,14 +409,14 @@ class Config:
     @staticmethod
     def has_ffmpeg():
         configure_ffmpeg_runtime()
-        path = shutil.which('ffmpeg')
+        path = _which_tool('ffmpeg')
         env = os.environ.copy()
         return bool(path and _usable_executable(path, env) and _render_capable_ffmpeg(path, env))
 
     @staticmethod
     def has_ffprobe():
         configure_ffmpeg_runtime()
-        path = shutil.which('ffprobe')
+        path = _which_tool('ffprobe')
         return bool(path and _usable_executable(path, os.environ.copy()))
 
     @staticmethod
