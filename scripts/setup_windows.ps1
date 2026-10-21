@@ -54,29 +54,14 @@ function Ensure-Python312 {
         throw 'Python 3.12 is not installed. Install it with `winget install --id Python.Python.3.12 --exact --scope user`, reopen PowerShell, and run this script again.'
     }
 
-    Write-Host 'Python 3.12 is missing. Asking the Python Launcher to install it with winget...' -ForegroundColor Yellow
-    $previousAllowInstall = $env:PYLAUNCHER_ALLOW_INSTALL
-    $env:PYLAUNCHER_ALLOW_INSTALL = '1'
-    try {
-        if (-not (Test-Python312 $py)) {
-            Write-Host 'The launcher could not install Python automatically. Installing the official Python 3.12 package with winget...' -ForegroundColor Yellow
-            & $winget.Source 'install' '--id' 'Python.Python.3.12' '--exact' '--scope' 'user' '--accept-source-agreements' '--accept-package-agreements'
-            if ($LASTEXITCODE -ne 0) {
-                throw 'winget could not install Python 3.12. Install it manually, reopen PowerShell, and run this script again.'
-            }
-        }
-    }
-    finally {
-        if ($null -eq $previousAllowInstall) {
-            Remove-Item Env:PYLAUNCHER_ALLOW_INSTALL -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:PYLAUNCHER_ALLOW_INSTALL = $previousAllowInstall
-        }
+    Write-Host 'Python 3.12 is missing. Installing the official Python 3.12 package with winget...' -ForegroundColor Yellow
+    & $winget.Source 'install' '--id' 'Python.Python.3.12' '--exact' '--source' 'winget' '--scope' 'user' '--accept-source-agreements' '--accept-package-agreements'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'winget could not install Python 3.12. Install it manually with `winget install --id Python.Python.3.12 --exact --scope user`, reopen PowerShell, and run this script again.'
     }
 
     if (-not (Test-Python312 $py)) {
-        throw 'Python 3.12 was installed or updated, but the launcher cannot see it yet. Close and reopen PowerShell, then run this script again.'
+        throw 'Python 3.12 was installed, but the launcher cannot see it yet. Close and reopen PowerShell, run `py --list` to verify it, and then run this script again.'
     }
     return $py
 }

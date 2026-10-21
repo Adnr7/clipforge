@@ -32,10 +32,11 @@ FFprobe pair before the build/test steps:
 .\scripts\setup_windows.ps1 -Task test
 ```
 
-If the Python Launcher reports that no Python 3.12 runtime is available, run
-`winget install --id Python.Python.3.12 --exact --scope user`, reopen PowerShell,
-and retry the setup command. Node.js/npm must also be installed before the
-frontend dependency step.
+If the Python Launcher reports that no Python 3.12 runtime is available, verify
+it with `py --list`. Run `winget install --id Python.Python.3.12 --exact
+--scope user`, close and reopen PowerShell, run `py --list` again, and retry the
+setup command. Node.js/npm must also be installed before the frontend dependency
+step.
 
 ```bash
 # frontend/

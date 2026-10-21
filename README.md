@@ -187,8 +187,8 @@ and PowerShell. Setup downloads/installs all **project** dependencies locally:
 
 Python 3.12 and Node.js/npm are host prerequisites rather than project
 dependencies. If the Python Launcher is installed but Python 3.12 is missing,
-the setup script first asks the launcher to install the official Python 3.12
-package through `winget`. If that is unavailable, install it manually:
+the setup script installs the official Python 3.12 package through `winget`. If
+that fails, install it manually:
 
 ```powershell
 winget install --id Python.Python.3.12 --exact --scope user
