@@ -151,6 +151,45 @@ bootstraps a verified user-space FFmpeg/FFprobe runtime when native tools are no
 already available. `make setup` installs the declared Python and frontend
 dependencies locally; it does not install anything globally.
 
+### Reproducible Windows PowerShell setup
+
+The `Makefile` uses POSIX paths such as `.venv/bin/python` and is not a native
+Windows command. On Windows, use the included PowerShell entrypoint instead:
+
+```powershell
+git clone https://github.com/Adnr7/clipforge.git
+Set-Location .\clipforge
+
+# Only needed if this PowerShell session blocks local scripts.
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+.\scripts\setup_windows.ps1 -Task setup
+.\scripts\setup_windows.ps1 -Task build
+.\scripts\setup_windows.ps1 -Task test
+.\scripts\setup_windows.ps1 -Task run
+```
+
+Or run the complete setup, build, test, and server flow with:
+
+```powershell
+.\scripts\setup_windows.ps1 -Task all
+```
+
+The Windows script expects the Python Launcher with Python **3.12**, Node.js/npm,
+and PowerShell. Setup downloads/installs all **project** dependencies locally:
+
+1. Creates `.venv` and installs the locked Python packages from
+   `requirements-dev.lock`.
+2. Runs `npm --prefix frontend ci` using `frontend/package-lock.json`.
+3. Downloads both pinned native Windows `ffmpeg.exe` and `ffprobe.exe`, verifies
+   their SHA-256 checksums, validates `drawtext` and `libx264`, and stores them
+   under `%LOCALAPPDATA%\ClipForge\ffmpeg\6.0\bin`.
+
+Python 3.12 and Node.js/npm are host prerequisites rather than project
+dependencies. Install them once with their official Windows installers, reopen
+PowerShell, and then run the setup script. The script does not silently install
+system-wide runtimes or require administrator access.
+
 The same project can run in Docker without a host Python or Node installation:
 
 ```bash
@@ -185,8 +224,8 @@ SHA-256-verified user-space FFmpeg/FFprobe runtime the first time you start the
 backend. It is installed under `~/.local/share/clipforge/ffmpeg/` and reused on
 future launches. No `sudo` or interactive package-manager step is required.
 
-On **native x86_64 Windows**, ClipForge performs the same verified setup using
-native `.exe` tools. The files are stored under
+On **native x86_64 Windows**, ClipForge performs the same *type* of verified
+setup as Linux/WSL, but it uses separate native Windows `.exe` assets. The files are stored under
 `%LOCALAPPDATA%\ClipForge\ffmpeg\` and are used by the backend without changing
 the machine-wide PATH or requiring administrator access. The first launch needs
 network access; restart ClipForge after a failed or interrupted download.
@@ -198,9 +237,9 @@ PowerShell at the repository root:
 .\.venv\Scripts\python.exe scripts\setup_ffmpeg_windows.py
 ```
 
-The first launch needs network access. The runtime includes the `drawtext`
-filter and `libx264`; captions also need usable fonts installed in the Linux
-environment.
+The runtime includes the `drawtext` filter and `libx264`. Windows supplies the
+caption fonts through its normal Fonts directories; WSL/Linux needs usable fonts
+installed inside the Linux environment.
 
 The backend also checks the declared `yt-dlp` Python dependency at startup and
 installs it into the active virtual environment when it is missing. This enables

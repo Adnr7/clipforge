@@ -64,6 +64,14 @@ From the repository root with the virtual environment activated:
 make test
 ```
 
+On native Windows, run the equivalent checked setup with PowerShell:
+
+```powershell
+.\scripts\setup_windows.ps1 -Task setup
+.\scripts\setup_windows.ps1 -Task build
+.\scripts\setup_windows.ps1 -Task test
+```
+
 FFmpeg and FFprobe must be on `PATH` for media coverage. The tests create their
 own temporary files and use controlled model responses; cloud API keys are not
 required.
