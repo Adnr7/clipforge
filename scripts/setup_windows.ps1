@@ -36,12 +36,53 @@ function Get-RequiredCommand {
     return $command.Path
 }
 
-function Ensure-PythonEnvironment {
+function Test-Python312 {
+    param([Parameter(Mandatory = $true)][string]$PythonLauncher)
+
+    & $PythonLauncher '-3.12' '-c' 'import sys; assert sys.version_info[:2] == (3, 12), "ClipForge requires Python 3.12"'
+    return $LASTEXITCODE -eq 0
+}
+
+function Ensure-Python312 {
     $py = Get-RequiredCommand 'py'
-    & $py '-3.12' '-c' 'import sys; assert sys.version_info[:2] == (3, 12), "ClipForge requires Python 3.12"'
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Python 3.12 was not found. Install Python 3.12 and enable the Python Launcher.'
+    if (Test-Python312 $py) {
+        return $py
     }
+
+    $winget = Get-Command 'winget' -ErrorAction SilentlyContinue
+    if ($null -eq $winget) {
+        throw 'Python 3.12 is not installed. Install it with `winget install --id Python.Python.3.12 --exact --scope user`, reopen PowerShell, and run this script again.'
+    }
+
+    Write-Host 'Python 3.12 is missing. Asking the Python Launcher to install it with winget...' -ForegroundColor Yellow
+    $previousAllowInstall = $env:PYLAUNCHER_ALLOW_INSTALL
+    $env:PYLAUNCHER_ALLOW_INSTALL = '1'
+    try {
+        if (-not (Test-Python312 $py)) {
+            Write-Host 'The launcher could not install Python automatically. Installing the official Python 3.12 package with winget...' -ForegroundColor Yellow
+            & $winget.Source 'install' '--id' 'Python.Python.3.12' '--exact' '--scope' 'user' '--accept-source-agreements' '--accept-package-agreements'
+            if ($LASTEXITCODE -ne 0) {
+                throw 'winget could not install Python 3.12. Install it manually, reopen PowerShell, and run this script again.'
+            }
+        }
+    }
+    finally {
+        if ($null -eq $previousAllowInstall) {
+            Remove-Item Env:PYLAUNCHER_ALLOW_INSTALL -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:PYLAUNCHER_ALLOW_INSTALL = $previousAllowInstall
+        }
+    }
+
+    if (-not (Test-Python312 $py)) {
+        throw 'Python 3.12 was installed or updated, but the launcher cannot see it yet. Close and reopen PowerShell, then run this script again.'
+    }
+    return $py
+}
+
+function Ensure-PythonEnvironment {
+    $py = Ensure-Python312
 
     Push-Location $Root
     try {

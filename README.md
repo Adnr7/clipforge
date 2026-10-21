@@ -186,9 +186,17 @@ and PowerShell. Setup downloads/installs all **project** dependencies locally:
    under `%LOCALAPPDATA%\ClipForge\ffmpeg\6.0\bin`.
 
 Python 3.12 and Node.js/npm are host prerequisites rather than project
-dependencies. Install them once with their official Windows installers, reopen
-PowerShell, and then run the setup script. The script does not silently install
-system-wide runtimes or require administrator access.
+dependencies. If the Python Launcher is installed but Python 3.12 is missing,
+the setup script first asks the launcher to install the official Python 3.12
+package through `winget`. If that is unavailable, install it manually:
+
+```powershell
+winget install --id Python.Python.3.12 --exact --scope user
+```
+
+Reopen PowerShell after installing Python or Node.js. The project script does
+not install system-wide runtimes without your package-manager approval and does
+not require administrator access for its own FFmpeg/FFprobe installation.
 
 The same project can run in Docker without a host Python or Node installation:
 
