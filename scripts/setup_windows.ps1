@@ -25,6 +25,12 @@ function Get-RequiredCommand {
 
     $command = Get-Command $Name -ErrorAction SilentlyContinue
     if ($null -eq $command) {
+        if ($Name -eq 'py') {
+            throw "Python 3.12 was not found. Install Python 3.12 from python.org, enable the Python Launcher, and reopen PowerShell."
+        }
+        if ($Name -eq 'npm') {
+            throw "Node.js/npm was not found. Install Node.js 22.12.0, then reopen PowerShell."
+        }
         throw "Required command '$Name' was not found. Install it and reopen PowerShell."
     }
     return $command.Path
@@ -37,8 +43,14 @@ function Ensure-PythonEnvironment {
         throw 'Python 3.12 was not found. Install Python 3.12 and enable the Python Launcher.'
     }
 
-    if (-not (Test-Path -LiteralPath $VenvPython)) {
-        Invoke-Checked $py @('-3.12', '-m', 'venv', '.venv')
+    Push-Location $Root
+    try {
+        if (-not (Test-Path -LiteralPath $VenvPython)) {
+            Invoke-Checked $py @('-3.12', '-m', 'venv', '.venv')
+        }
+    }
+    finally {
+        Pop-Location
     }
 }
 

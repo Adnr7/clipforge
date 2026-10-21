@@ -22,7 +22,9 @@ make setup
 make test
 ```
 
-On native Windows, use the PowerShell setup entrypoint instead of `make`:
+On native Windows, use the PowerShell setup entrypoint instead of `make`.
+It installs the locked Python/frontend dependencies and the native FFmpeg and
+FFprobe pair before the build/test steps:
 
 ```powershell
 .\scripts\setup_windows.ps1 -Task setup

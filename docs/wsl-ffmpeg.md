@@ -1,4 +1,15 @@
-# Native FFmpeg for Linux/WSL without sudo
+# Native FFmpeg for Linux/WSL and Windows
+
+ClipForge has two separate first-run media setup paths:
+
+- **Linux/WSL:** use the Bash/Python helper described below. It downloads Linux
+  binaries that can read Linux paths such as `/home/...` and `/tmp/...`.
+- **Native Windows:** use `scripts/setup_windows.ps1` from PowerShell. It
+  downloads native Windows `.exe` binaries and stores them in the current user's
+  `%LOCALAPPDATA%` directory.
+
+Do not use Windows `.exe` tools inside WSL, and do not use the Linux helper from
+native Windows.
 
 ClipForge's WSL backend needs Linux `ffmpeg` and `ffprobe` to read WSL paths
 such as `/home/...` and `/tmp/...`. Windows `.exe` files on the inherited
@@ -29,21 +40,31 @@ native `@ffprobe-installer/linux-x64` 5.2.0 asset (N-66595). Both are static
 Linux executables. Running the helper again reuses a working installation.
 Neither apt nor npm is needed by the helper.
 
-## Native Windows
+## Native Windows PowerShell setup
 
 On x86_64 Windows, startup uses `scripts/setup_ffmpeg_windows.py` automatically
 when native tools are not already available. It downloads pinned FFmpeg 6.0
 `.exe` assets, verifies their SHA-256 checksums, checks `drawtext` and `libx264`,
 and stores them in `%LOCALAPPDATA%\ClipForge\ffmpeg\6.0\bin`. No administrator
-access or machine-wide PATH change is required. To run it before startup:
+access or machine-wide PATH change is required. The complete Windows setup,
+including locked Python packages, frontend packages, FFmpeg, and FFprobe, is:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\setup_ffmpeg_windows.py
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\scripts\setup_windows.ps1 -Task setup
+.\scripts\setup_windows.ps1 -Task build
+.\scripts\setup_windows.ps1 -Task run
 ```
 
-The WSL helper is intentionally Linux-only. Native x86_64 Windows uses the
-separate `scripts/setup_ffmpeg_windows.py` helper and stores verified `.exe`
-tools under `%LOCALAPPDATA%\ClipForge\ffmpeg\` without administrator access.
+To run the full setup, build, test, and server flow in one command:
+
+```powershell
+.\scripts\setup_windows.ps1 -Task all
+```
+
+The lower-level `scripts/setup_ffmpeg_windows.py` helper is also available when
+you only need to install or verify the two media binaries.
+
 Windows ARM, macOS, and ARM Linux currently require a compatible native
 installation. Cloning a repository cannot safely install system-wide binaries
 on every operating system, so unsupported platforms receive manual setup
