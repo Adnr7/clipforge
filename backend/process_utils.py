@@ -13,15 +13,18 @@ def hidden_process_kwargs() -> dict:
     # FFprobe from opening a transient terminal when ClipForge is launched as
     # a windowed executable. The fallback keeps the helper usable on hosts
     # where the Windows-only constant is not exposed.
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = subprocess.SW_HIDE
     create_no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
     detached_process = getattr(subprocess, 'DETACHED_PROCESS', 0x00000008)
-    return {
+    options = {
         # The detached flag covers older/native console builds; CREATE_NO_WINDOW
         # covers normal console tools. Together with STARTF_USESHOWWINDOW this
         # prevents both a visible terminal and an inherited console attachment.
         'creationflags': create_no_window | detached_process,
-        'startupinfo': startupinfo,
     }
+    startupinfo_type = getattr(subprocess, 'STARTUPINFO', None)
+    if startupinfo_type is not None:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, 'STARTF_USESHOWWINDOW', 1)
+        startupinfo.wShowWindow = getattr(subprocess, 'SW_HIDE', 0)
+        options['startupinfo'] = startupinfo
+    return options

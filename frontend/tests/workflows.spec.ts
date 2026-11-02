@@ -551,7 +551,7 @@ test('centered library and desktop/mobile workspace geometry with light, dark, a
   await expect(page.getByRole('button', { name: 'Analyze again', exact: true }).locator('.workflow-step')).toHaveText('3')
   await expect(page.locator('.candidate-footer label .workflow-step').first()).toHaveText('4')
   await expect(page.getByRole('button', { name: 'Render selected (1)', exact: true }).locator('.workflow-step')).toHaveText('5')
-  await expect(page.getByRole('link', { name: 'Download selected (1)', exact: true }).locator('.workflow-step')).toHaveText('6')
+  await expect(page.getByRole('button', { name: 'Save selected (1)', exact: true }).locator('.workflow-step')).toHaveText('6')
   await expectManualLayout(page); await page.screenshot({ path: testInfo.outputPath('workspace-light-1440.png'), fullPage: true })
   await page.getByLabel('Color theme').selectOption('dark'); await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark'); await page.screenshot({ path: testInfo.outputPath('workspace-dark-1440.png'), fullPage: true })
   await page.getByLabel('Color theme').selectOption('nord'); await expect(page.locator('html')).toHaveAttribute('data-theme', 'nord')
@@ -575,7 +575,7 @@ test('centered library and desktop/mobile workspace geometry with light, dark, a
   const actions = page.locator('.workspace-header .header-actions')
   for (const [name, action] of [
     ['Render selected', actions.getByRole('button', { name: 'Render selected (1)', exact: true })],
-    ['Download selected', actions.getByRole('link', { name: 'Download selected (1)', exact: true })],
+    ['Save selected', actions.getByRole('button', { name: 'Save selected (1)', exact: true })],
   ] as const) {
     const box = (await action.boundingBox())!
     expect.soft(box.width, `${name} at 390px needs readable label space`).toBeGreaterThanOrEqual(120)
