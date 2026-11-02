@@ -13,6 +13,14 @@ def start_server(app, port):
     from waitress import serve
     serve(app, host='127.0.0.1', port=port, threads=4)
 
+def run_embedded_yt_dlp():
+    """Run yt-dlp from a frozen executable as a child-process helper."""
+    marker = '--clipforge-yt-dlp'
+    marker_index = sys.argv.index(marker)
+    sys.argv = [sys.argv[0], *sys.argv[marker_index + 1:]]
+    from yt_dlp import main as yt_dlp_main
+    return yt_dlp_main()
+
 def main():
     port = int(os.environ.get('CLIPFORGE_PORT', '5174'))
     app = create_app()
@@ -58,4 +66,6 @@ def main():
     webview.start(debug=('--debug' in sys.argv))
 
 if __name__ == '__main__':
+    if '--clipforge-yt-dlp' in sys.argv:
+        raise SystemExit(run_embedded_yt_dlp())
     main()

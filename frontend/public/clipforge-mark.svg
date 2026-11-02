@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title desc">
+  <title id="title">ClipForge mark</title>
+  <desc id="desc">A pale blue cut-frame C with a coral forge cut on a charcoal square.</desc>
+  <rect x="3.5" y="3.5" width="41" height="41" rx="12" fill="#101317" stroke="#3e5665"/>
+  <path d="M31.5 15.8a11.4 11.4 0 1 0 0 16.4" fill="none" stroke="#b8d7e8" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M13 14.5v4m0 5.5v4m0 5.5v4M16 14.5h2m-5 19h5" stroke="#88c0d0" stroke-width="2" stroke-linecap="round"/>
+  <path d="m22.7 29.7 9.8-10.2-1.2 5.1 4 .7-10 9.2 1-4.7z" fill="#e58f8a"/>
+  <path d="M21 24h5.5" stroke="#d0e7f2" stroke-width="2" stroke-linecap="round" opacity=".9"/>
+</svg>

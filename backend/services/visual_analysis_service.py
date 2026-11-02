@@ -33,6 +33,8 @@ import os
 import re
 import subprocess
 import tempfile
+
+from backend.process_utils import hidden_process_kwargs
 import time
 
 from backend.services import llm_service, media_service
@@ -340,7 +342,7 @@ def sample_frames(source_path, duration, frame_count=10):
         try:
             with tempfile.TemporaryFile(mode='w+b') as output:
                 subprocess.run(command, check=True, stdout=output, stderr=subprocess.DEVNULL,
-                               timeout=timeout)
+                               timeout=timeout, **hidden_process_kwargs())
                 output.seek(0)
                 image = output.read(MAX_FRAME_BYTES + 1)
         except (OSError, subprocess.SubprocessError):

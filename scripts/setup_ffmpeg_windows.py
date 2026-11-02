@@ -20,6 +20,8 @@ import subprocess
 import tempfile
 from urllib.request import Request, urlopen
 
+from backend.process_utils import hidden_process_kwargs
+
 
 VERSION = '6.0'
 _RELEASE_BASE = 'https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0'
@@ -78,6 +80,7 @@ def _works(path: Path) -> bool:
             text=True,
             timeout=15,
             check=False,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -93,6 +96,7 @@ def _works(path: Path) -> bool:
             text=True,
             timeout=15,
             check=False,
+            **hidden_process_kwargs(),
         )
         encoders = subprocess.run(
             [str(path), '-hide_banner', '-encoders'],
@@ -100,6 +104,7 @@ def _works(path: Path) -> bool:
             text=True,
             timeout=15,
             check=False,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False

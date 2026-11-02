@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Clapperboard, Cloud, HardDrive } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Cloud, HardDrive } from 'lucide-react'
 import { api, errorMessage, type TranscriptionMode } from '../api/client'
 import { ANALYSIS_PROVIDERS, enteredKeys, KEY_PROVIDERS } from '../api/providers'
 import { useEnvironment } from '../hooks/useEnvironment'
@@ -69,7 +69,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   }
 
   return <main className="onboarding">
-    <header className="onboarding-header"><div className="brand"><span className="brand-mark"><Clapperboard size={21} /></span><strong>ClipForge</strong></div><ThemeSelect /></header>
+    <header className="onboarding-header"><div className="brand"><span className="brand-mark"><img src="/clipforge-mark.svg" alt="" /></span><strong>ClipForge</strong></div><ThemeSelect /></header>
     <div className="onboarding-content">
       <ol className="setup-steps" aria-label="Setup progress">{steps.map((label, index) => <li key={label} className={index === step ? 'active' : index < step ? 'complete' : ''} aria-current={index === step ? 'step' : undefined}><span>{index < step ? <Check size={14} /> : index + 1}</span>{label}</li>)}</ol>
       <section className="onboarding-card">

@@ -1,6 +1,7 @@
 import json
 import hashlib
 import os
+import shutil
 import uuid
 import tempfile
 import zipfile
@@ -351,6 +352,103 @@ def _archive_download_name(project, project_id):
     project_name = secure_filename(str(project.get('name') or '').strip())
     project_name = project_name or secure_filename(str(project_id)) or 'project'
     return f"clipforge-{project_name}-clips.zip"
+
+
+def _save_artifact_to_downloads(source, name):
+    """Copy a completed artifact to the user's visible ClipForge folder."""
+    download_dir = Path(Config.get_download_dir())
+    download_dir.mkdir(parents=True, exist_ok=True)
+    destination = download_dir / name
+    temporary = download_dir / f'.{name}.{uuid.uuid4().hex}.part'
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return destination
+
+
+def _saved_download_response(path, **extra):
+    payload = {
+        'path': str(path),
+        'folder': str(path.parent),
+        'name': path.name,
+        'bytes': path.stat().st_size,
+    }
+    payload.update(extra)
+    return jsonify(payload)
+
+
+@rendering_bp.route('/clips/<clip_id>/download', methods=['POST'])
+def download_clip_to_folder(clip_id):
+    """Save one completed MP4 to the user's visible Downloads folder."""
+    row = get_db().execute('''
+        SELECT c.id, c.status, c.output_path, cand.rank, cand.project_id
+        FROM clips c JOIN candidates cand ON c.candidate_id=cand.id
+        WHERE c.id=?
+    ''', (clip_id,)).fetchone()
+    if row is None or row['status'] != 'done' or not row['output_path']:
+        return jsonify({'error': 'Completed clip not found'}), 404
+    path = _export_file(row, row['project_id'])
+    if path is None:
+        return jsonify({'error': 'Clip file not found on disk'}), 409
+    try:
+        saved = _save_artifact_to_downloads(path, _clip_download_name(row['rank'], row['id']))
+        return _saved_download_response(saved)
+    except OSError:
+        current_app.logger.exception('Could not save clip %s to Downloads', clip_id)
+        return jsonify({'error': 'Could not save the clip to the Downloads folder'}), 409
+
+
+@rendering_bp.route('/projects/<project_id>/export-to-downloads', methods=['POST'])
+def export_project_to_downloads(project_id):
+    """Build and save a ZIP of completed clips to the user's Downloads folder."""
+    archive_path = None
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or set(data) - {'clipIds'}:
+            raise _RouteError('Request must contain only clipIds')
+        requested = data.get('clipIds')
+        if not isinstance(requested, list) or not requested or len(requested) > 500:
+            raise _RouteError('clipIds must contain 1 to 500 clip IDs')
+        if any(not isinstance(item, str) or not item.strip() or len(item) > 100 for item in requested):
+            raise _RouteError('clipIds must contain non-empty clip IDs')
+        requested = list(dict.fromkeys(item.strip() for item in requested))
+        project = _get_project(get_db(), project_id)
+        placeholders = ','.join('?' for _ in requested)
+        clips = get_db().execute(f'''
+            SELECT c.*, cand.rank FROM clips c JOIN candidates cand ON c.candidate_id=cand.id
+            WHERE cand.project_id=? AND c.id IN ({placeholders}) ORDER BY cand.rank, c.rowid
+        ''', [project_id, *requested]).fetchall()
+        if len(clips) != len(requested):
+            raise _RouteError('clipIds contains clips not found in this project', 404)
+        available = []
+        for clip in clips:
+            path = _export_file(clip, project_id)
+            if path is None:
+                raise _RouteError('A requested clip is not completed or its file is unavailable', 409)
+            available.append((clip, path))
+
+        download_dir = Path(Config.get_download_dir())
+        download_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = download_dir / f'.{_archive_download_name(project, project_id)}.{uuid.uuid4().hex}.part'
+        with zipfile.ZipFile(archive_path, mode='w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+            used_names = set()
+            for clip, path in available:
+                archive.write(path, arcname=_archive_clip_name(clip['rank'], clip['id'], used_names))
+        destination = download_dir / _archive_download_name(project, project_id)
+        os.replace(archive_path, destination)
+        archive_path = None
+        return _saved_download_response(destination, clipCount=len(available))
+    except _RouteError as exc:
+        return jsonify({'error': str(exc)}), exc.status_code
+    except OSError:
+        current_app.logger.exception('Could not save project %s export to Downloads', project_id)
+        return jsonify({'error': 'Could not save the ZIP to the Downloads folder'}), 409
+    finally:
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
 
 
 @rendering_bp.route('/projects/<project_id>/export', methods=['GET'])

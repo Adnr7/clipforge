@@ -178,7 +178,8 @@ code { font-size: 12px; }
 .app-header { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 10px clamp(18px, 4.5vw, 72px); border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand strong { font-size: 19px; font-weight: 650; letter-spacing: -.6px; }
-.brand-mark { width: 39px; height: 39px; border-radius: 7px; display: grid; place-items: center; background: var(--accent-primary); color: var(--accent-contrast); }
+.brand-mark { width: 39px; height: 39px; flex: 0 0 39px; display: grid; place-items: center; border-radius: 10px; overflow: hidden; }
+.brand-mark img { display: block; width: 100%; height: 100%; }
 .brand-subtitle { display: block; font-size: 8px; font-weight: 650; letter-spacing: 2.1px; margin-top: 1px; color: var(--text-secondary); }
 .header-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dashboard-main { max-width: 1420px; padding: 0 clamp(18px, 3vw, 48px); margin: 0 auto; }
@@ -367,7 +368,7 @@ input[type='checkbox'], input[type='radio'] { width: 15px; height: 15px; flex-sh
 @media (max-width: 640px) {
   h1 { font-size: 29px; }
   .app-header, .onboarding-header { padding: 15px 18px; gap: 12px; }
-  .brand { gap: 9px; } .brand strong { font-size: 17px; } .brand-mark { width: 34px; height: 34px; }
+  .brand { gap: 9px; } .brand strong { font-size: 17px; } .brand-mark { width: 34px; height: 34px; flex-basis: 34px; }
   .brand-subtitle { font-size: 7px; }
   .header-actions { gap: 9px; }
   .app-header .theme-select > svg { display: none; }

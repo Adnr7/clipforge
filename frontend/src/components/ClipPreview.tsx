@@ -5,7 +5,7 @@ import { formatTime } from '../api/format'
 import Modal from './ui/Modal'
 import WorkflowStep from './ui/WorkflowStep'
 
-export default function ClipPreview({ clip, candidate, onClose }: { clip: Clip; candidate: Candidate; onClose: () => void }) {
+export default function ClipPreview({ clip, candidate, onClose, onDownload }: { clip: Clip; candidate: Candidate; onClose: () => void; onDownload: () => void }) {
   const [error, setError] = useState(false)
   const clipFileUrl = api.clipFileUrl(clip.id)
   let renderedStyle = 'Original render'
@@ -24,7 +24,7 @@ export default function ClipPreview({ clip, candidate, onClose }: { clip: Clip; 
     <div className="stack"><div><h3>{candidate.hook}</h3><p className="muted">{formatTime(candidate.start_sec)} – {formatTime(candidate.end_sec)} · {formatTime(candidate.end_sec - candidate.start_sec)}</p></div>
       <video className="clip-preview" controls src={clipFileUrl} preload="metadata" playsInline style={{ aspectRatio: dimensions ? `${dimensions.width} / ${dimensions.height}` : undefined, objectFit: 'contain' }} aria-label={`Rendered clip: ${candidate.hook}`} onError={() => setError(true)} />
       {error && <p className="notice notice-error" role="alert">The preview could not load. Try downloading the MP4, or re-render if the file is unavailable.</p>}
-      <div className="clip-preview-info"><p className="muted">{outputLabel} · {renderedStyle}<br />Captions and filters are embedded in this file.</p><a className="btn-accent" title="Step 6: Download completed MP4" href={clipFileUrl} download><WorkflowStep step={6} /><Download size={16} />Download MP4</a></div>
+       <div className="clip-preview-info"><p className="muted">{outputLabel} · {renderedStyle}<br />Captions and filters are embedded in this file.</p><button className="btn-accent" title="Step 6: Save completed MP4" onClick={onDownload}><WorkflowStep step={6} /><Download size={16} />Save MP4</button></div>
     </div>
   </Modal>
 }

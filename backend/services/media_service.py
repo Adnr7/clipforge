@@ -11,6 +11,8 @@ import json
 import os
 import math
 
+from backend.process_utils import hidden_process_kwargs
+
 
 def probe_media(file_path: str) -> dict:
     """Get media file metadata using ffprobe."""
@@ -20,7 +22,8 @@ def probe_media(file_path: str) -> dict:
         '-show_format', '-show_streams',
         file_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                            **hidden_process_kwargs())
     if result.returncode != 0 or not result.stdout.strip():
         raise FileNotFoundError(f"ffprobe failed for '{file_path}': {result.stderr.strip()[:200]}")
     data = json.loads(result.stdout)
@@ -93,7 +96,7 @@ def extract_audio(video_path: str, output_path: str) -> str:
         '-ar', '16000', '-ac', '1',
         '-y', output_path
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    subprocess.run(cmd, check=True, capture_output=True, **hidden_process_kwargs())
     return output_path
 
 
@@ -171,7 +174,7 @@ def render_portrait_clip(
         '-y', output_path
     ]
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True, **hidden_process_kwargs())
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or b'').decode(errors='replace')[-2000:]
         raise RuntimeError(f'FFmpeg render failed: {detail}') from exc
@@ -280,7 +283,8 @@ def render_preview_frame(source_path, output_file, time_sec, caption_words=None,
     cmd += ['-vf', ','.join(filters), '-frames:v', '1', '-an', '-c:v', 'mjpeg',
             '-q:v', '3', '-f', 'image2pipe', 'pipe:1']
     try:
-        subprocess.run(cmd, check=True, stdout=output_file, stderr=subprocess.PIPE, timeout=30)
+        subprocess.run(cmd, check=True, stdout=output_file, stderr=subprocess.PIPE, timeout=30,
+                       **hidden_process_kwargs())
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError('Preview timed out after 30 seconds') from exc
     except subprocess.CalledProcessError as exc:

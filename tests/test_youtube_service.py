@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.services import youtube_service
 from backend.services.youtube_service import check_youtube_copyright, download_youtube_video
 
 
@@ -15,6 +16,13 @@ def fake_process(lines, returncode=0):
     process.returncode = returncode
     process.wait.return_value = returncode
     return process
+
+
+def test_frozen_build_uses_embedded_yt_dlp_helper(monkeypatch):
+    monkeypatch.setattr(youtube_service.sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(youtube_service.sys, 'executable', 'ClipForge.exe')
+
+    assert youtube_service._yt_dlp_command() == ['ClipForge.exe', '--clipforge-yt-dlp']
 
 
 @pytest.mark.parametrize('filename', ['video.mp4', 'video.webm'])

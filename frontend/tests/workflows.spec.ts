@@ -38,7 +38,7 @@ type MockState = {
   previewFrames: Record<string, unknown>[]; suggestions: Record<string, unknown>[]; suggestionRequests: Record<string, unknown>[]
   renderRequests: { candidateId: string; body: Record<string, unknown> }[]; manualRequests: Record<string, unknown>[]; batchStyles: string[]; exportRequests: string[]; modelRequests: Record<string, unknown>[]
   clipStatusRequests: string[]; legacyJobStatusRequests: string[]; detailReads: number; batchProjectReads: number
-  batchActive: boolean; batchIds: string[]; failNextProjectRead: boolean; delaySettingsMs: number; delaySelectionMs: number; youtubeTerminal: boolean
+  batchActive: boolean; batchIds: string[]; failNextProjectRead: boolean; delaySettingsMs: number; delaySelectionMs: number; youtubeTerminal: boolean; setupComplete: boolean
 }
 
 function audioFixture() {
@@ -72,7 +72,7 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
     settings: { llmProvider: 'deepseek', transcriptionMode: 'local', whisperModel: 'base', captionStyle: 'classic', dataDir: '/data', customBaseUrl: '', customModel: '', ollamaModel: 'llama3.2' },
      environmentKeys: {}, profiles: [], activeProfiles: {}, renderSettingsSaves: [], analysisRequests: [], previewFrames: [], suggestions: [], suggestionRequests: [],
      renderRequests: [], manualRequests: [], batchStyles: [], exportRequests: [], modelRequests: [], clipStatusRequests: [], legacyJobStatusRequests: [], detailReads: 0,
-    batchProjectReads: 0, batchActive: false, batchIds: [], failNextProjectRead: false, delaySettingsMs: options.delaySettingsMs || 0, delaySelectionMs: 0, youtubeTerminal: true,
+     batchProjectReads: 0, batchActive: false, batchIds: [], failNextProjectRead: false, delaySettingsMs: options.delaySettingsMs || 0, delaySelectionMs: 0, youtubeTerminal: true, setupComplete: options.onboarded !== false,
   }
   const jobs = { transcription: { status: 'idle' }, analysis: { status: 'idle' } }
   const stringValue = (body: Record<string, unknown>, key: string) => typeof body[key] === 'string' ? body[key] as string : ''
@@ -101,7 +101,8 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
          hasAnthropicKey: !!state.environmentKeys.ANTHROPIC_API_KEY, hasGeminiKey: !!state.environmentKeys.GEMINI_API_KEY,
          hasOpenaiKey: !!state.environmentKeys.OPENAI_API_KEY, hasOpenrouterKey: !!state.environmentKeys.OPENROUTER_API_KEY,
          hasGroqKey: !!state.environmentKeys.GROQ_API_KEY, hasCustomProvider: !!state.environmentKeys.CUSTOM_API_KEY && !!state.settings.customBaseUrl,
-         mediaRuntime: mediaReady ? { state: 'ready', platform: 'test-linux-x86_64', source: 'system', message: 'FFmpeg and FFprobe are ready.' }
+          downloadDir: '/downloads/ClipForge', setupComplete: state.setupComplete,
+          mediaRuntime: mediaReady ? { state: 'ready', platform: 'test-linux-x86_64', source: 'system', message: 'FFmpeg and FFprobe are ready.' }
            : { state: 'failed', platform: 'test-linux-x86_64', source: null, message: 'Automatic media setup failed. Restart ClipForge or install native FFmpeg/FFprobe.' } })
     }
     if (path === '/settings') {
@@ -117,6 +118,7 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
         if (typeof values.CUSTOM_BASE_URL === 'string') state.settings.customBaseUrl = values.CUSTOM_BASE_URL
         if (typeof values.CUSTOM_MODEL === 'string') state.settings.customModel = values.CUSTOM_MODEL
         if (typeof values.OLLAMA_MODEL === 'string') state.settings.ollamaModel = values.OLLAMA_MODEL
+        if (values.SETUP_COMPLETE === '1') state.setupComplete = true
         return json({ ok: true })
       }
       return json(state.settings)
@@ -193,6 +195,8 @@ async function mockApi(page: Page, options: { onboarded?: boolean; initialClips?
     if (path === '/projects/p1/export') {
       state.exportRequests.push(url.search); return route.fulfill({ status: 200, contentType: 'application/zip', body: zipFixture(), headers: { 'content-disposition': 'attachment; filename="clipforge-export.zip"' } })
     }
+    if (path === '/clips/latest/download' && method === 'POST') return json({ path: '/downloads/ClipForge/clipforge-clip-001-latest.mp4', folder: '/downloads/ClipForge', name: 'clipforge-clip-001-latest.mp4', bytes: 4 })
+    if (path === '/projects/p1/export-to-downloads' && method === 'POST') return json({ path: '/downloads/ClipForge/clipforge-project-clips.zip', folder: '/downloads/ClipForge', name: 'clipforge-project-clips.zip', bytes: 10, clipCount: 1 })
     if (path === '/projects/p1/candidates' && method === 'PATCH') {
       state.events.push('selection:save')
       if (state.delaySelectionMs) await new Promise((resolve) => setTimeout(resolve, state.delaySelectionMs))
@@ -460,18 +464,16 @@ test('YouTube metadata, progress, automatic project creation and polling cleanup
   await page.keyboard.press('Escape'); const polls = state.events.filter((event) => event === 'youtube:poll').length; await page.waitForTimeout(1800); expect(state.events.filter((event) => event === 'youtube:poll').length).toBe(polls)
 })
 
-test('timestamps seek real media, download uses the completed ZIP anchor, and no render starts', async ({ page }) => {
+test('timestamps seek real media, downloads save to the visible folder, and no render starts', async ({ page }) => {
   const state = await mockApi(page); await page.goto('/'); await page.getByRole('button', { name: `Open project ${projectFixture.name}` }).click()
   const video = page.getByLabel('Source media player'); await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThan(0)
   await page.getByRole('button', { name: 'Seek to 0:10', exact: true }).click(); await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBe(10)
   await page.getByRole('button', { name: 'Seek to clip 1 at 0:05' }).click(); await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBe(5)
   await expect(page.getByText('Render failed · view details')).toBeVisible(); await expect(page.getByRole('button', { name: 'Retry render' })).toBeEnabled()
   const preview = page.getByRole('button', { name: 'Preview', exact: true }); await preview.click(); const previewDialog = page.getByRole('dialog', { name: 'Preview clip 1' })
-  await expect(previewDialog.locator('video')).toHaveAttribute('src', '/api/clips/latest/file'); await expect(previewDialog.locator('video')).toHaveAttribute('controls', ''); await expect(previewDialog.getByRole('link', { name: 'Download MP4' })).toHaveAttribute('href', '/api/clips/latest/file')
+  await expect(previewDialog.locator('video')).toHaveAttribute('src', '/api/clips/latest/file'); await expect(previewDialog.locator('video')).toHaveAttribute('controls', ''); await previewDialog.getByRole('button', { name: 'Save MP4' }).click(); await expect(page.getByText(/Saved .* to \/downloads\/ClipForge/)).toBeVisible()
   await page.keyboard.press('Escape'); await expect(preview).toBeFocused()
-  const zip = page.getByRole('link', { name: 'Download selected (1)' }); await expect(zip).toHaveAttribute('href', /\/api\/projects\/p1\/export\?clipIds=latest$/)
-  const [download] = await Promise.all([page.waitForEvent('download'), zip.click()])
-  expect(download.suggestedFilename()).toBeTruthy()
+  const zip = page.getByRole('button', { name: 'Save selected (1)' }); await zip.click(); await expect(page.getByText(/Saved 1 clips to \/downloads\/ClipForge/)).toBeVisible()
   expect(state.renderRequests).toEqual([]); expect(state.batchStyles).toEqual([])
 })
 

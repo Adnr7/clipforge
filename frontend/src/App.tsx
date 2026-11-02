@@ -5,6 +5,7 @@ import Onboarding from './components/Onboarding'
 import SettingsPanel from './components/SettingsPanel'
 import { ToastProvider } from './components/ui/Toast'
 import { useEnvironment } from './hooks/useEnvironment'
+import { api } from './api/client'
 
 type View =
   | { page: 'onboarding' }
@@ -18,9 +19,10 @@ export default function App() {
   const [onboardingDismissed, setOnboardingDismissed] = useState(
     () => { try { return localStorage.getItem('clipforge.onboarded') === '1' } catch { return false } }
   )
-  const showOnboarding = view.page === 'onboarding' || (!!status && !onboardingDismissed)
+  const showOnboarding = view.page === 'onboarding' || (!!status && !onboardingDismissed && !status.setupComplete)
 
   const completeOnboarding = useCallback(() => {
+    void api.markSetupComplete()
     try { localStorage.setItem('clipforge.onboarded', '1') } catch { /* Session-only completion. */ }
     setOnboardingDismissed(true)
     setView({ page: 'dashboard' })

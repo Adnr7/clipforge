@@ -19,6 +19,7 @@ dist/
 htmlcov/
 *.egg-info/
 build/
+assets/clipforge.ico
 
 # Editor and operating-system files
 .idea/

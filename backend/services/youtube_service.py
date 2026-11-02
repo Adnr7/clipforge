@@ -15,6 +15,8 @@ import threading
 from collections import deque
 from urllib.parse import parse_qs, urlparse
 
+from backend.process_utils import hidden_process_kwargs
+
 
 _RESULT_PREFIX = '__CLIPFORGE_RESULT__'
 _DOWNLOAD_TIMEOUT = 600
@@ -22,6 +24,10 @@ _DOWNLOAD_TIMEOUT = 600
 
 def _yt_dlp_command():
     """Prefer the active Python environment's module over a PATH-only script."""
+    if getattr(sys, 'frozen', False):
+        # A frozen executable cannot interpret ``python -m yt_dlp``.  The
+        # desktop entry point exposes a small child-process mode instead.
+        return [sys.executable, '--clipforge-yt-dlp']
     return [sys.executable, '-m', 'yt_dlp'] if importlib.util.find_spec('yt_dlp') else ['yt-dlp']
 
 
@@ -57,7 +63,8 @@ def check_youtube_copyright(url: str) -> dict:
         return {'ok': False, 'error': error}
     cmd = [*_yt_dlp_command(), '--ignore-config', '--dump-single-json', '--no-warnings', '--no-playlist', '--', url]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                                **hidden_process_kwargs())
     except FileNotFoundError:
         return {'ok': False, 'error': 'yt-dlp is not installed. Install it with: pip install yt-dlp'}
     except subprocess.TimeoutExpired:
@@ -135,7 +142,8 @@ def download_youtube_video(url: str, output_dir: str, progress_cb=None) -> dict:
     try:
         process = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding='utf-8', errors='replace', bufsize=1
+            text=True, encoding='utf-8', errors='replace', bufsize=1,
+            **hidden_process_kwargs(),
         )
 
         def stop_download():

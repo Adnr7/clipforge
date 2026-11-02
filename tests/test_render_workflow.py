@@ -430,6 +430,42 @@ def test_clip_file_is_inline_and_has_identifiable_clipforge_download_name(app, c
     response.close()
 
 
+def test_clip_download_saves_to_visible_download_folder(app, client, monkeypatch, tmp_path):
+    seed_project(app)
+    add_clip(app, 'saved-artifact')
+    download_dir = tmp_path / 'Downloads' / 'ClipForge'
+    monkeypatch.setenv('CLIPFORGE_DOWNLOAD_DIR', str(download_dir))
+
+    response = client.post('/api/clips/saved-artifact/download')
+
+    assert response.status_code == 200
+    saved = Path(response.json['path'])
+    assert saved == download_dir / 'clipforge-clip-001-saved-artifact.mp4'
+    assert saved.read_bytes() == b'clip'
+    assert response.json['folder'] == str(download_dir)
+
+
+def test_project_export_to_downloads_saves_zip_to_visible_folder(app, client, monkeypatch, tmp_path):
+    seed_project(app, count=2)
+    add_clip(app, 'saved-one')
+    add_clip(app, 'saved-two', candidate='candidate-project-1')
+    download_dir = tmp_path / 'Downloads' / 'ClipForge'
+    monkeypatch.setenv('CLIPFORGE_DOWNLOAD_DIR', str(download_dir))
+
+    response = client.post('/api/projects/project/export-to-downloads', json={
+        'clipIds': ['saved-one', 'saved-two'],
+    })
+
+    assert response.status_code == 200
+    archive_path = Path(response.json['path'])
+    assert archive_path == download_dir / 'clipforge-project-clips.zip'
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == [
+            'clipforge-clip-001-saved-one.mp4',
+            'clipforge-clip-002-saved-two.mp4',
+        ]
+
+
 @pytest.mark.parametrize('kind', ['outside', 'symlink', 'empty', 'missing'])
 def test_export_rejects_unavailable_or_out_of_project_artifacts(app, client, tmp_path, kind):
     seed_project(app)
