@@ -7,6 +7,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from flask import current_app, has_app_context
+from backend.process_utils import hidden_process_kwargs
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -159,6 +160,7 @@ def _usable_executable(path, env=None):
             env=env,
             timeout=5,
             check=False,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -176,6 +178,7 @@ def _render_capable_ffmpeg(path, env=None):
             env=env,
             timeout=5,
             check=False,
+            **hidden_process_kwargs(),
         )
         encoders = subprocess.run(
             [str(path), '-hide_banner', '-encoders'],
@@ -184,6 +187,7 @@ def _render_capable_ffmpeg(path, env=None):
             env=env,
             timeout=5,
             check=False,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -385,6 +389,7 @@ def ensure_ytdlp_runtime():
             text=True,
             timeout=180,
             check=True,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -401,6 +406,14 @@ class Config:
     @staticmethod
     def get_environment_data_dir():
         return os.path.abspath(os.path.expanduser(os.environ.get('DATA_DIR') or '~/.clipforge'))
+
+    @staticmethod
+    def get_download_dir():
+        """Return the user-visible folder where exported files are saved."""
+        configured = os.environ.get('CLIPFORGE_DOWNLOAD_DIR')
+        if configured:
+            return os.path.abspath(os.path.expanduser(configured))
+        return os.path.abspath(os.path.join(os.path.expanduser('~/Downloads'), 'ClipForge'))
 
     @staticmethod
     def get_llm_provider():
@@ -441,6 +454,8 @@ class Config:
             }
         return {
             'dataDir': Config.get_data_dir(),
+            'downloadDir': Config.get_download_dir(),
+            'setupComplete': os.environ.get('SETUP_COMPLETE') == '1',
             'hasFfmpeg': has_ffmpeg,
             'hasFfprobe': has_ffprobe,
             'mediaRuntime': runtime,

@@ -1,15 +1,15 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Download, Play, Scissors, SlidersHorizontal, XCircle } from 'lucide-react'
-import { api, type Candidate, type Clip } from '../api/client'
+import { type Candidate, type Clip } from '../api/client'
 import { formatTime } from '../api/format'
 import { isActiveJob, isFailedJob, latestClips } from '../api/jobs'
 import ClipPreview from './ClipPreview'
 import WorkflowStep from './ui/WorkflowStep'
 
-export default function CandidateList({ candidates, clips, sourceDuration, preferredClipIds, onCreateManualCut, onRender, onSeek, onSelectToggle, selectionBusy, renderBusy, captionStyle, onOpenControls, disabled, analysisFailed, analysisError, onRetryAnalysis }: {
+export default function CandidateList({ candidates, clips, sourceDuration, preferredClipIds, onCreateManualCut, onRender, onSeek, onSelectToggle, onDownload, selectionBusy, renderBusy, captionStyle, onOpenControls, disabled, analysisFailed, analysisError, onRetryAnalysis }: {
   candidates: Candidate[]; clips: Clip[]; onRender: (candidate: Candidate) => void; onSeek: (time: number) => void
   sourceDuration: number; preferredClipIds: Record<string, string>; onCreateManualCut: (startSec: number, endSec: number, title: string) => void
-  onSelectToggle: (candidate: Candidate, selected: boolean) => void; selectionBusy: boolean; renderBusy: boolean
+  onSelectToggle: (candidate: Candidate, selected: boolean) => void; onDownload: (clip: Clip) => void; selectionBusy: boolean; renderBusy: boolean
   captionStyle: string; onOpenControls: () => void; disabled: boolean; analysisFailed: boolean; analysisError?: string | null; onRetryAnalysis: () => void
 }) {
   const byCandidate = useMemo(() => latestClips(clips), [clips])
@@ -43,11 +43,11 @@ export default function CandidateList({ candidates, clips, sourceDuration, prefe
           <h3>{candidate.hook}</h3><p className="rationale">{candidate.rationale}</p>
           {candidate.selection?.method === 'audience-first-v1' && <details className="candidate-evidence"><summary>Audience fit & source evidence</summary><p><strong>{candidate.selection.audienceInferred ? 'Inferred audience' : 'Audience'}:</strong> {candidate.selection.audience}</p><p>{candidate.selection.audienceReason}</p><dl>{Object.entries(candidate.selection.assessment).map(([key, value]) => <div key={key}><dt>{({ audienceFit: 'Audience fit', hook: 'Hook', payoff: 'Payoff', clarity: 'Clarity', shareability: 'Shareability' } as Record<string, string>)[key]}</dt><dd>{value}/5</dd></div>)}</dl>{candidate.selection.evidence.basis === 'transcript' ? <><p><strong>Opening:</strong> “{candidate.selection.evidence.openingQuote}”</p><p><strong>Payoff:</strong> “{candidate.selection.evidence.closingQuote}”</p></> : <p><strong>Sample at {formatTime(candidate.selection.evidence.timeSeconds)}:</strong> {candidate.selection.evidence.description}</p>}</details>}
           {failed && <details className="clip-error"><summary>Render failed · view details</summary><p>{clip?.render_log || 'The render did not complete. Try rendering this clip again.'}</p></details>}
-          {doneClip && <><span className="badge badge-success align-start">{active || failed ? 'Previous render available' : 'Ready to download'}</span><div className="clip-actions"><button className="btn-secondary" onClick={() => setPreview({ candidate, clip: doneClip })}><Play size={14} />Preview</button><a className="btn-secondary" title="Step 6: Download completed MP4" href={api.clipFileUrl(doneClip.id)} download><WorkflowStep step={6} /><Download size={14} />Download MP4</a></div></>}
+           {doneClip && <><span className="badge badge-success align-start">{active || failed ? 'Previous render available' : 'Ready to download'}</span><div className="clip-actions"><button className="btn-secondary" onClick={() => setPreview({ candidate, clip: doneClip })}><Play size={14} />Preview</button><button className="btn-secondary" title="Step 6: Save completed MP4" onClick={() => onDownload(doneClip)}><WorkflowStep step={6} /><Download size={14} />Save MP4</button></div></>}
           <div className="candidate-footer"><label title="Step 4: Select clips to keep"><input type="checkbox" checked={!!candidate.selected} disabled={selectionBusy || disabled || renderBusy} onChange={(event) => onSelectToggle(candidate, event.target.checked)} aria-label={`Select clip ${candidate.rank}: ${candidate.hook}`} /><WorkflowStep step={4} />Select</label><button className={done ? 'btn-secondary' : 'btn-accent'} title="Step 5: Render this clip" disabled={active || renderBusy || disabled || selectionBusy} onClick={() => onRender(candidate)}><WorkflowStep step={5} />{active ? <span className="spinner" /> : <Scissors size={13} />}{active ? (clip?.status === 'pending' || clip?.status === 'queued' ? 'Queued…' : 'Rendering…') : failed ? 'Retry render' : done ? 'Re-render' : 'Render clip'}</button></div>
         </article>
       })}
     </div>
-    {preview && <ClipPreview clip={preview.clip} candidate={preview.candidate} onClose={() => setPreview(null)} />}
+     {preview && <ClipPreview clip={preview.clip} candidate={preview.candidate} onClose={() => setPreview(null)} onDownload={() => onDownload(preview.clip)} />}
   </>
 }

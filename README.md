@@ -175,6 +175,28 @@ Or run the complete setup, build, test, and server flow with:
 .\scripts\setup_windows.ps1 -Task all
 ```
 
+### Build a Windows executable
+
+The repository includes a PyInstaller workflow for a Windows x64 desktop build.
+It bundles the Flask backend, the production React UI, pywebview, and yt-dlp into
+one unsigned executable. FFmpeg/FFprobe remain a verified per-user first-run
+download, so the executable does not need administrator access.
+
+After the Windows setup step above, build the executable with:
+
+```powershell
+.\scripts\build_windows_exe.ps1
+```
+
+The output is `dist\ClipForge.exe`. Run that file to open the desktop studio.
+The build also suppresses console windows from FFmpeg, FFprobe, and yt-dlp helper
+processes while the app starts or processes media. The ClipForge mark is included
+in the app header, browser tab, and Windows executable icon.
+The executable is ignored by Git on purpose; publish it as a GitHub Release asset
+(preferably inside a ZIP with a checksum) rather than committing generated binary
+files to the source branch. Builds are Windows x64 artifacts and are not portable
+to macOS or Linux. Windows may show SmartScreen for this unsigned personal build.
+
 The Windows script expects the Python Launcher with Python **3.12**, Node.js/npm,
 and PowerShell. Setup downloads/installs all **project** dependencies locally:
 

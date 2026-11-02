@@ -46,6 +46,8 @@ def test_settings_persist_reload_and_mask(app, monkeypatch):
     assert all(isinstance(value, bool) for key, value in status.json.items() if key.endswith('Key'))
     assert settings.json['transcriptionMode'] == 'local'
     assert settings.json['llmProvider'] == 'ollama'
+    assert client.put('/api/settings', json={'SETUP_COMPLETE': '1'}).status_code == 200
+    assert create_app().test_client().get('/api/status').json['setupComplete'] is True
     for response in (status, settings):
         assert 'test-secret' not in response.text and 'stale-key' not in response.text
         assert not set(response.json) & _KEYS

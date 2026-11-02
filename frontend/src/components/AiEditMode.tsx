@@ -41,13 +41,13 @@ function sourceRatio(width: number, height: number): string {
   return `${ratio.toFixed(2)}:1`
 }
 
-export default function AiEditMode({ detail, active, busy, audienceBrief, onAudienceChange, captionSettings, videoFilters, outputSettings, onBusyChange, onRefresh, onRenderQueued, onSelectionSaved, onManual, onOpenControls }: {
+export default function AiEditMode({ detail, active, busy, audienceBrief, onAudienceChange, captionSettings, videoFilters, outputSettings, onBusyChange, onRefresh, onRenderQueued, onSelectionSaved, onManual, onOpenControls, onDownloadClip, onDownloadProject }: {
   detail: ProjectDetail; active: boolean; busy: boolean; captionSettings: CaptionSettings; videoFilters: VideoFilters
   outputSettings: OutputSettings
   audienceBrief: AudienceBrief; onAudienceChange: (brief: AudienceBrief) => void
   onBusyChange: (busy: boolean) => void; onRefresh: () => Promise<boolean>
   onRenderQueued: (candidateId: string, clipId: string) => void; onSelectionSaved: () => void
-  onManual: () => void; onOpenControls: () => void
+  onManual: () => void; onOpenControls: () => void; onDownloadClip: (clipId: string) => void; onDownloadProject: (clipIds: string[]) => void
 }) {
   const projectId = detail.project.id
   const [draft, setDraft] = useState(() => loadDraft(projectId))
@@ -245,7 +245,7 @@ export default function AiEditMode({ detail, active, busy, audienceBrief, onAudi
           {running && <p role="status" className="muted">{Object.values(activities).find((activity) => activity.status === 'running')?.detail || 'Checking the reviewed project…'}</p>}
           {runError && <p className="notice notice-error" role="alert">{runError}</p>}
           {result && <p className="notice" role="status">Automated edit complete. {result.clipIds.length} {result.clipIds.length === 1 ? 'MP4 is' : 'MP4s are'} ready to review.</p>}
-          {completedClips.length > 0 && <div className="ai-results"><h4>Completed exports</h4>{completedClips.map((clip) => <div key={clip.id} className="ai-result"><span>{detail.candidates.find((candidate) => candidate.id === clip.candidate_id)?.hook || 'Completed clip'}</span><button className="btn-secondary" onClick={() => setPreviewId(clip.id)}><Play size={14} />Preview</button><a className="btn-secondary" href={api.clipFileUrl(clip.id)} download><Download size={14} />MP4</a></div>)}<a className="btn-accent" href={api.exportUrl(projectId, completedClips.map((clip) => clip.id))} download><Download size={16} />Download completed edits ({completedClips.length})</a></div>}
+           {completedClips.length > 0 && <div className="ai-results"><h4>Completed exports</h4>{completedClips.map((clip) => <div key={clip.id} className="ai-result"><span>{detail.candidates.find((candidate) => candidate.id === clip.candidate_id)?.hook || 'Completed clip'}</span><button className="btn-secondary" onClick={() => setPreviewId(clip.id)}><Play size={14} />Preview</button><button className="btn-secondary" onClick={() => onDownloadClip(clip.id)}><Download size={14} />Save MP4</button></div>)}<button className="btn-accent" onClick={() => onDownloadProject(completedClips.map((clip) => clip.id))}><Download size={16} />Save completed edits ({completedClips.length})</button></div>}
           <button className="text-button" onClick={onManual}>Review candidates in Manual mode</button>
         </section>
       </div>
@@ -263,6 +263,6 @@ export default function AiEditMode({ detail, active, busy, audienceBrief, onAudi
         <div className="form-actions"><button className="btn-secondary" onClick={() => setPlan(null)}>Back to brief</button><button className="btn-accent" disabled={blocked || stalePlan || !confirmed || (plan.replacesCandidates && !replaceConfirmed)} onClick={() => void startEdit()}><Play size={16} />Start automated edit</button></div>
       </div>
     </Modal>}
-    {previewClip && previewCandidate && <ClipPreview clip={previewClip} candidate={previewCandidate} onClose={() => setPreviewId(null)} />}
+    {previewClip && previewCandidate && <ClipPreview clip={previewClip} candidate={previewCandidate} onClose={() => setPreviewId(null)} onDownload={() => onDownloadClip(previewClip.id)} />}
   </section>
 }

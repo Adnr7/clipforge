@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { AlertTriangle, ArrowRight, Clapperboard, Film, Plus, Search, Settings } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Film, Plus, Search, Settings } from 'lucide-react'
 import { api, errorMessage, type EnvironmentStatus, type Project } from '../api/client'
 import { useProjects } from '../hooks/useProjects'
 import { useToast } from '../hooks/useToast'
@@ -33,7 +33,7 @@ export default function Dashboard({ onOpenProject, onOpenSettings, mediaReady, m
     finally { setBusy(false) }
   }
   return <div className="app-shell">
-    <header className="app-header"><div className="brand"><span className="brand-mark"><Clapperboard size={21} /></span><div><strong>ClipForge</strong><span className="brand-subtitle">THE CLIP STUDIO</span></div></div><nav className="header-actions" aria-label="Workspace settings"><ThemeSelect /><button className="btn-secondary" onClick={onOpenSettings}><Settings size={16} />Settings</button></nav></header>
+    <header className="app-header"><div className="brand"><span className="brand-mark"><img src="/clipforge-mark.svg" alt="" /></span><div><strong>ClipForge</strong><span className="brand-subtitle">THE CLIP STUDIO</span></div></div><nav className="header-actions" aria-label="Workspace settings"><ThemeSelect /><button className="btn-secondary" onClick={onOpenSettings}><Settings size={16} />Settings</button></nav></header>
     <main className="dashboard-main">
       {!mediaReady && <div className="notice notice-warning"><AlertTriangle size={18} /><span>{mediaRuntime?.message || 'FFmpeg and FFprobe are not ready. Media tools will be prepared automatically on supported Linux/WSL and Windows systems.'}</span><button className="text-button" onClick={onStartOnboarding}>View setup guide <ArrowRight size={14} /></button></div>}
       <section className="dashboard-heading"><div><p className="eyebrow">YOUR WORKSPACE</p><h1>Projects</h1><p className="muted">Long-form stories. Standout moments.</p></div><button className="btn-accent" title={mediaReady ? 'Step 1: Import media' : 'Media tools are not ready'} disabled={!mediaReady} onClick={() => setNewProjectOpen(true)}><WorkflowStep step={1} /><Plus size={17} />New project</button></section>

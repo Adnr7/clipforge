@@ -20,6 +20,7 @@ _KEYS = {
     'ANTHROPIC_API_KEY', 'GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY',
     'CUSTOM_API_KEY', 'CUSTOM_BASE_URL', 'CUSTOM_MODEL', 'OLLAMA_MODEL',
     'LLM_PROVIDER', 'TRANSCRIPTION_MODE', 'WHISPER_MODEL', 'CAPTION_STYLE',
+    'SETUP_COMPLETE',
 }
 
 system_bp = Blueprint('system', __name__)
@@ -237,6 +238,8 @@ def get_settings():
         'whisperModel': os.environ.get('WHISPER_MODEL', 'base'),
         'captionStyle': os.environ.get('CAPTION_STYLE', 'classic'),
         'dataDir': Config.get_data_dir(),
+        'downloadDir': Config.get_download_dir(),
+        'setupComplete': os.environ.get('SETUP_COMPLETE') == '1',
         'customBaseUrl': os.environ.get('CUSTOM_BASE_URL', ''),
         'customModel': os.environ.get('CUSTOM_MODEL', ''),
         'ollamaModel': os.environ.get('OLLAMA_MODEL', 'llama3.2'),

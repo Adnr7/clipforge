@@ -218,6 +218,8 @@ export interface YoutubeDownloadStatus {
 
 export interface EnvironmentStatus {
   dataDir: string
+  downloadDir: string
+  setupComplete: boolean
   hasFfmpeg: boolean
   hasFfprobe: boolean
   mediaRuntime?: {
@@ -236,6 +238,14 @@ export interface EnvironmentStatus {
   hasCustomProvider: boolean
   llmProvider: string
   hasYtdlp: boolean
+}
+
+export interface SavedDownload {
+  path: string
+  folder: string
+  name: string
+  bytes: number
+  clipCount?: number
 }
 
 export interface Project {
@@ -356,6 +366,8 @@ export const api = {
     }),
   getClipStatus: (clipId: string, signal?: AbortSignal) =>
     request<JobStatus>(`/clips/${clipId}/status`, { signal }),
+  downloadClip: (clipId: string) =>
+    request<SavedDownload>(`/clips/${clipId}/download`, { method: 'POST' }),
   renderBatch: (projectId: string, options: RenderOptions = {}) =>
     request<{ clipIds: string[]; status?: string }>(`/projects/${projectId}/render-batch`, {
       method: 'POST', body: JSON.stringify(options),
@@ -419,6 +431,13 @@ export const api = {
     return response.blob()
   },
   exportUrl: (projectId: string, clipIds: string[]) => `${API_BASE}/projects/${projectId}/export?${new URLSearchParams({ clipIds: clipIds.join(',') })}`,
+  exportToDownloads: (projectId: string, clipIds: string[]) =>
+    request<SavedDownload>(`/projects/${projectId}/export-to-downloads`, {
+      method: 'POST', body: JSON.stringify({ clipIds }),
+    }),
+  markSetupComplete: () => request<void>('/settings', {
+    method: 'PUT', body: JSON.stringify({ SETUP_COMPLETE: '1' }),
+  }),
   updateSettings: async (data: Record<string, string>) => {
     const result = await request('/settings', { method: 'PUT', body: JSON.stringify(data) })
     window.dispatchEvent(new Event('clipforge:settings'))

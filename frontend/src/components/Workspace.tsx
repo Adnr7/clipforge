@@ -48,6 +48,7 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
   const [seekRequest, setSeekRequest] = useState<{ time: number; sequence: number } | null>(null)
   const [pending, setPending] = useState<'transcribe' | 'analyze' | 'render' | 'manual' | null>(null)
   const [selectionBusy, setSelectionBusy] = useState(false)
+  const [downloadBusy, setDownloadBusy] = useState(false)
   const [selectionOverride, setSelectionOverride] = useState<Set<string> | null>(null)
   const [renderArtifactIds, setRenderArtifactIds] = useState<Record<string, string>>({})
   const [confirmAnalysis, setConfirmAnalysis] = useState(false)
@@ -116,7 +117,30 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     } catch { return false }
   }
   const toRender = selected.filter((candidate) => !matchingLook(completed.get(candidate.id)))
-  const exportUrl = api.exportUrl(projectId, downloadable.map((candidate) => completed.get(candidate.id)!.id))
+  const saveClip = async (clipId: string) => {
+    if (downloadBusy) return
+    setDownloadBusy(true)
+    try {
+      const saved = await api.downloadClip(clipId)
+      showToast('success', `Saved ${saved.name} to ${saved.folder}`)
+    } catch (error) {
+      showToast('error', errorMessage(error))
+    } finally {
+      if (mounted.current) setDownloadBusy(false)
+    }
+  }
+  const saveSelected = async (clipIds: string[]) => {
+    if (downloadBusy || !clipIds.length) return
+    setDownloadBusy(true)
+    try {
+      const saved = await api.exportToDownloads(projectId, clipIds)
+      showToast('success', `Saved ${saved.clipCount || clipIds.length} clips to ${saved.folder}`)
+    } catch (error) {
+      showToast('error', errorMessage(error))
+    } finally {
+      if (mounted.current) setDownloadBusy(false)
+    }
+  }
   const saveControls = async () => {
     if (savingControls || aiBusy) return
     setSavingControls(true); setSaveNotice(null)
@@ -227,7 +251,7 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
   if (loading && !detail) return <main className="empty-state full-state" role="status"><span className="spinner" /><p>Loading project…</p></main>
   if (!detail) return <main className="empty-state full-state"><XCircle size={32} /><h1>Unable to open project</h1><p role="alert">{error || 'Project not found'}</p><div className="inline"><button className="btn-secondary" onClick={onBack}>Back to projects</button><button className="btn-accent" onClick={() => void refresh()}>Retry</button></div></main>
   return <main className="workspace">
-    <header className="workspace-header"><button className="btn-ghost" onClick={onBack} aria-label="Back to projects"><ArrowLeft size={19} /></button><div className="workspace-title"><h1>{detail.project.name}</h1><p className="mono" title={detail.project.source_path}>{detail.project.source_path.split(/[\\/]/).at(-1)}</p></div><nav className="workspace-edit-modes" aria-label="Editing mode"><button className="btn-ghost" aria-pressed={editMode === 'manual'} onClick={() => setEditMode('manual')}><Scissors size={15} />Manual</button><button className="btn-ghost" aria-pressed={editMode === 'ai'} onClick={() => { setAiVisited(true); setEditMode('ai') }}><Sparkles size={15} />AI Edit</button></nav><div className="header-actions"><ThemeSelect />{editMode === 'manual' && <><button className="btn-secondary" title="Step 5: Render selected clips without a completed file" onClick={() => render()} disabled={aiBusy || toRender.length === 0 || rendering || processing || !!pending || selectionBusy}><WorkflowStep step={5} /><Scissors size={15} />Render selected ({toRender.length})</button>{downloadable.length ? <a className="btn-accent" title="Step 6: Download existing MP4s without rendering again" href={exportUrl} download><WorkflowStep step={6} /><Download size={15} />Download selected ({downloadable.length})</a> : <button className="btn-accent" disabled><WorkflowStep step={6} /><Download size={15} />Download selected (0)</button>}</>}<button className="btn-ghost" onClick={onOpenSettings} aria-label="Open settings"><Settings size={18} /></button></div></header>
+     <header className="workspace-header"><button className="btn-ghost" onClick={onBack} aria-label="Back to projects"><ArrowLeft size={19} /></button><div className="workspace-title"><h1>{detail.project.name}</h1><p className="mono" title={detail.project.source_path}>{detail.project.source_path.split(/[\\/]/).at(-1)}</p></div><nav className="workspace-edit-modes" aria-label="Editing mode"><button className="btn-ghost" aria-pressed={editMode === 'manual'} onClick={() => setEditMode('manual')}><Scissors size={15} />Manual</button><button className="btn-ghost" aria-pressed={editMode === 'ai'} onClick={() => { setAiVisited(true); setEditMode('ai') }}><Sparkles size={15} />AI Edit</button></nav><div className="header-actions"><ThemeSelect />{editMode === 'manual' && <><button className="btn-secondary" title="Step 5: Render selected clips without a completed file" onClick={() => render()} disabled={aiBusy || toRender.length === 0 || rendering || processing || !!pending || selectionBusy}><WorkflowStep step={5} /><Scissors size={15} />Render selected ({toRender.length})</button>{downloadable.length ? <button className="btn-accent" title="Step 6: Save existing MP4s without rendering again" onClick={() => void saveSelected(downloadable.map((candidate) => completed.get(candidate.id)!.id))} disabled={downloadBusy}><WorkflowStep step={6} /><Download size={15} />{downloadBusy ? 'Saving…' : `Save selected (${downloadable.length})`}</button> : <button className="btn-accent" disabled><WorkflowStep step={6} /><Download size={15} />Save selected (0)</button>}</>}<button className="btn-ghost" onClick={onOpenSettings} aria-label="Open settings"><Settings size={18} /></button></div></header>
     <PipelineStatus stage={stage} hasTranscript={!!transcript} hasCandidates={detail.candidates.length > 0} hasClips={completed.size > 0} hasSelection={selected.length > 0} />
     {aiBusy && <div className="notice" role="status">AI automation is running. Keep this project open for the next steps; leaving stops future requests, while queued server jobs can finish.</div>}
     {error && <div className="notice notice-error" role="alert"><span>Live updates interrupted; retrying automatically. {error}</span><button className="text-button" onClick={() => void refresh()}>Retry now</button></div>}
@@ -236,9 +260,9 @@ export default function Workspace({ projectId, onBack, onOpenSettings }: { proje
     <div className="workspace-grid" ref={manualGrid} hidden={editMode !== 'manual'}>
       <section className="workspace-panel media-panel" aria-label="Source media"><MediaPlayer projectId={projectId} hasTranscript={!!transcript} onTimeUpdate={setCurrentTime} onTranscribe={transcribe} seekRequest={seekRequest} transcribing={transcribing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} mode={detail.project.transcription_mode} /></section>
       <section className="workspace-panel transcript-panel" aria-label="Transcript"><TranscriptView transcript={transcript} hasSpeech={hasSpeech} currentTime={currentTime} onSeek={seek} onAnalyze={requestAnalysis} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} hasCandidates={visibleCandidates.length > 0} analyzing={analyzing} disabled={aiBusy || processing || rendering || !!pending || selectionBusy} invalid={!!detail.transcript && !transcript} /></section>
-       <section id="candidate-panel" className="workspace-panel candidates-panel" aria-label="Clip candidates"><CandidateList candidates={visibleCandidates} clips={detail.clips} sourceDuration={detail.project.source_duration || 0} preferredClipIds={renderArtifactIds} onCreateManualCut={createManualCut} onRender={render} onSeek={seek} onSelectToggle={(candidate, checked) => void toggleSelection(candidate, checked)} selectionBusy={selectionBusy} renderBusy={rendering} disabled={aiBusy || processing || !!pending} captionStyle={captionStyle} onOpenControls={() => setControlsOpen(true)} analysisFailed={isFailedJob(jobs.analysis.status)} analysisError={jobs.analysis.error} onRetryAnalysis={requestAnalysis} /></section>
+       <section id="candidate-panel" className="workspace-panel candidates-panel" aria-label="Clip candidates"><CandidateList candidates={visibleCandidates} clips={detail.clips} sourceDuration={detail.project.source_duration || 0} preferredClipIds={renderArtifactIds} onCreateManualCut={createManualCut} onRender={render} onSeek={seek} onSelectToggle={(candidate, checked) => void toggleSelection(candidate, checked)} onDownload={(clip) => void saveClip(clip.id)} selectionBusy={selectionBusy} renderBusy={rendering} disabled={aiBusy || processing || !!pending} captionStyle={captionStyle} onOpenControls={() => setControlsOpen(true)} analysisFailed={isFailedJob(jobs.analysis.status)} analysisError={jobs.analysis.error} onRetryAnalysis={requestAnalysis} /></section>
     </div>
-    {aiVisited && <AiEditMode detail={detail} active={editMode === 'ai'} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} busy={processing || rendering || !!pending || selectionBusy || savingControls || controlsOpen || suggestionsLoading} captionSettings={captionSettings} videoFilters={videoFilters} outputSettings={outputSettings} onBusyChange={setAiBusy} onRefresh={refresh} onSelectionSaved={() => setSelectionOverride(null)} onRenderQueued={(candidateId, clipId) => { setRenderArtifactIds((previous) => ({ ...previous, [candidateId]: clipId })); trackClips([clipId]) }} onManual={() => setEditMode('manual')} onOpenControls={() => setControlsOpen(true)} />}
+     {aiVisited && <AiEditMode detail={detail} active={editMode === 'ai'} audienceBrief={audienceBrief} onAudienceChange={setAudienceBrief} busy={processing || rendering || !!pending || selectionBusy || savingControls || controlsOpen || suggestionsLoading} captionSettings={captionSettings} videoFilters={videoFilters} outputSettings={outputSettings} onBusyChange={setAiBusy} onRefresh={refresh} onSelectionSaved={() => setSelectionOverride(null)} onRenderQueued={(candidateId, clipId) => { setRenderArtifactIds((previous) => ({ ...previous, [candidateId]: clipId })); trackClips([clipId]) }} onManual={() => setEditMode('manual')} onOpenControls={() => setControlsOpen(true)} onDownloadClip={(clipId) => void saveClip(clipId)} onDownloadProject={(clipIds) => void saveSelected(clipIds)} />}
     {confirmAnalysis && <Modal title="Replace clip candidates?" onClose={() => setConfirmAnalysis(false)} closeOnBackdrop={false}>
       <div className="stack"><p>Analyzing again replaces this project’s candidates and selections after a successful result. Existing rendered clips will no longer be available in this project. Download any clips you want to keep first.</p><div className="form-actions"><button className="btn-secondary" onClick={() => setConfirmAnalysis(false)}>Keep current candidates</button><button className="btn-danger" disabled={processing || rendering || !!pending || selectionBusy} onClick={() => { setConfirmAnalysis(false); analyze() }}>Replace and analyze</button></div></div>
     </Modal>}

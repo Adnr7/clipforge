@@ -212,7 +212,7 @@ test('confirmed automation transcribes, combines evidence, selects by length, an
   expect(state.requests.find(({ path }) => path.endsWith('/analyze'))?.body).toMatchObject({ mode: 'auto', brief: expect.stringContaining('Goal: One useful, practical idea') })
   expect(state.requests.find(({ path }) => path.endsWith('/candidates'))?.body).toEqual({ selectedIds: ['c2'] })
   expect(state.requests.find(({ path }) => path.endsWith('/render/c2'))?.body).toMatchObject({ captionSettings: { enabled: true }, outputSettings: fallbackRenderContract.output.defaults })
-  await expect(page.getByRole('link', { name: 'Download completed edits (1)' })).toHaveAttribute('href', '/api/projects/p1/export?clipIds=render-c2')
+  await expect(page.getByRole('button', { name: 'Save completed edits (1)' })).toBeVisible()
   await page.getByRole('button', { name: 'Preview', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Preview clip 2' }).locator('video')).toHaveAttribute('src', '/api/clips/render-c2/file')
 })
@@ -257,7 +257,7 @@ test('selection failure stops before renders; successful partial renders remain 
   expect(state.events).toEqual(['select']); state.failSelection = false; state.failRender = true
   await confirmPlan(page)
   await expect(page.getByRole('region', { name: 'Activity timeline' }).getByRole('alert')).toContainText('FFmpeg failed')
-  await expect(page.getByRole('link', { name: 'Download completed edits (2)' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save completed edits (2)' })).toBeVisible()
 })
 test('stop and unmount prevent future steps while accepted jobs can finish', async ({ page }) => {
   const state = await setup(page); state.holdTranscription = true
